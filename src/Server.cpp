@@ -9,6 +9,18 @@
 #include <iostream>
 #include <string>
 
+#define CRLF "\r\n"
+
+static std::string RESPSimpleString(const std::string& s)
+{
+    return "+" + s + CRLF;
+}
+
+static std::string get_response(const std::string& data)
+{
+    return RESPSimpleString("PONG");
+}
+
 int main(int argc, char **argv) {
     // Flush after every std::cout / std::cerr
     std::cout << std::unitbuf;
@@ -48,7 +60,27 @@ int main(int argc, char **argv) {
     int client_addr_len = sizeof(client_addr);
     std::cout << "Waiting for a client to connect...\n";
 
-    accept(server_fd, (struct sockaddr *)&client_addr, (socklen_t *)&client_addr_len);
+    int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, (socklen_t *)&client_addr_len);
+    if (client_fd < 0)
+    {
+        std::cerr << "Accept failed\n";
+        return -1;
+    }
+
+    char buffer[4096] = {0};
+    ssize_t bytes = recv(client_fd, (void*)buffer, 4095, 0);
+    if (bytes < 0)
+    {
+        std::cerr << "Receive from client failed\n";
+        return -1;
+    }
+
+    buffer[bytes] = '\0';
+    std::string data(buffer);
+
+    std::string response = get_response(data);
+    bytes = send(client_fd, response.c_str(), response.size(), 0);
+
     std::cout << "Client connected\n";
 
     close(server_fd);
