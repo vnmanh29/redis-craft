@@ -8,6 +8,8 @@
 #include <cstring>
 #include <iostream>
 #include <string>
+#include <thread>
+#include <vector>
 
 #define CRLF "\r\n"
 
@@ -19,6 +21,31 @@ static std::string RESPSimpleString(const std::string& s)
 static std::string get_response(const std::string& data)
 {
     return RESPSimpleString("PONG");
+}
+
+static void receive_and_send(int fd)
+{
+    std::cout << "Client connected\n";
+    
+    char buffer[4096] = {0};
+    while (true)
+    {
+        ssize_t recv_bytes = recv(fd, (void*)buffer, 4095, 0);
+        if (recv_bytes <= 0)
+        {
+            std::cerr << "Receive from client failed\n";
+            break;
+        }
+        
+        buffer[recv_bytes] = '\0';
+        std::string received_data(buffer);
+        
+        std::string response = get_response(received_data);
+        // std::cout << "response:\n" << response << "\nclient_fd: " << client_fd << std::endl;
+        ssize_t sent_bytes = send(fd, response.c_str(), response.size(), 0);
+    }
+
+    close(fd);
 }
 
 int main(int argc, char **argv) {
@@ -60,34 +87,29 @@ int main(int argc, char **argv) {
     int client_addr_len = sizeof(client_addr);
     std::cout << "Waiting for a client to connect...\n";
 
-    int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, (socklen_t *)&client_addr_len);
-    if (client_fd < 0)
-    {
-        std::cerr << "Accept failed\n";
-        return -1;
-    }
-    
+    std::vector<int> list_client_fd;
+
     while (true)
     {
-        char buffer[4096] = {0};
-        ssize_t bytes = recv(client_fd, (void*)buffer, 4095, 0);
-        if (bytes < 0)
+        int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, (socklen_t *)&client_addr_len);
+        if (client_fd < 0)
         {
-            std::cerr << "Receive from client failed\n";
+            std::cerr << "Accept failed\n";
             return -1;
         }
+
+        std::thread t(receive_and_send, client_fd);
+
         
-        buffer[bytes] = '\0';
-        std::string data(buffer);
-    
-        std::string response = get_response(data);
-        // std::cout << "response:\n" << response << "\nclient_fd: " << client_fd << std::endl;
-        bytes = send(client_fd, response.c_str(), response.size(), 0);
-    
-        std::cout << "Client connected\n";
+        list_client_fd.push_back(client_fd);
+        t.detach();        
     }
     
-    close(client_fd);      
+    for (int& fd : list_client_fd)
+    {
+        close(fd);
+    }
+
     close(server_fd);
 
     return 0;
