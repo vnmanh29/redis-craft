@@ -66,23 +66,28 @@ int main(int argc, char **argv) {
         std::cerr << "Accept failed\n";
         return -1;
     }
-
-    char buffer[4096] = {0};
-    ssize_t bytes = recv(client_fd, (void*)buffer, 4095, 0);
-    if (bytes < 0)
+    
+    while (true)
     {
-        std::cerr << "Receive from client failed\n";
-        return -1;
+        char buffer[4096] = {0};
+        ssize_t bytes = recv(client_fd, (void*)buffer, 4095, 0);
+        if (bytes < 0)
+        {
+            std::cerr << "Receive from client failed\n";
+            return -1;
+        }
+        
+        buffer[bytes] = '\0';
+        std::string data(buffer);
+    
+        std::string response = get_response(data);
+        // std::cout << "response:\n" << response << "\nclient_fd: " << client_fd << std::endl;
+        bytes = send(client_fd, response.c_str(), response.size(), 0);
+    
+        std::cout << "Client connected\n";
     }
-
-    buffer[bytes] = '\0';
-    std::string data(buffer);
-
-    std::string response = get_response(data);
-    bytes = send(client_fd, response.c_str(), response.size(), 0);
-
-    std::cout << "Client connected\n";
-
+    
+    close(client_fd);      
     close(server_fd);
 
     return 0;
