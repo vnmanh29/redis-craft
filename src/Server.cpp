@@ -11,6 +11,8 @@
 #include <thread>
 #include <vector>
 
+#include "all.hpp"
+
 #define CRLF "\r\n"
 
 static std::string RESPSimpleString(const std::string& s)
@@ -20,6 +22,26 @@ static std::string RESPSimpleString(const std::string& s)
 
 static std::string get_response(const std::string& data)
 {
+    // decode the RESP-data
+    resp::decoder dec;
+    resp::result res = dec.decode(data.c_str(), data.size());
+    resp::unique_value rep = res.value();
+
+    // cast to array
+    resp::unique_array<resp::unique_value> arr = rep.array();
+
+    // identify the command
+    if (arr[0].bulkstr().to_upper() == "ECHO")
+    {
+        // get the arg of command echo
+        resp::unique_value message = arr[1];
+
+          /// User's buffers.
+        std::vector<resp::buffer> buffers;
+        resp::encoder<resp::buffer>::append(buffers, message.bulkstr());
+        return buffers[0].data();
+    }
+    
     return RESPSimpleString("PONG");
 }
 
