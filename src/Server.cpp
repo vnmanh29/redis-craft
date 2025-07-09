@@ -114,3 +114,9 @@ int main(int argc, char **argv) {
 
     return 0;
 }
+
+/**
+ * TODO: 
+ * - Implement the RESP parser
+ * 
+ */

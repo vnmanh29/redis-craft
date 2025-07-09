@@ -14,3 +14,5 @@ add_executable(server ${SOURCE_FILES})
 
 target_link_libraries(server PRIVATE asio asio::asio)
 target_link_libraries(server PRIVATE Threads::Threads)
+
+target_include_directories(server PRIVATE src/resp)
