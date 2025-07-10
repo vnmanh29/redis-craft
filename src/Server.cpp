@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "all.hpp"
+#include "CommandExecutor.h"
 
 #define CRLF "\r\n"
 
@@ -36,37 +37,57 @@ static std::string get_response(const std::string& data)
         // get the arg of command echo
         resp::unique_value message = arr[1];
 
-          /// User's buffers.
 //        std::vector<resp::buffer> buffers;
 //        resp::encoder<resp::buffer>::append(buffers, message.bulkstr());
 //        return buffers[0].data();
 
+        /// User's buffers.
         resp::encoder<resp::buffer> encoder;
-        return encoder.encode_simple_str(message.bulkstr()).data();
+        return encoder.encode_bulk_str(message.bulkstr(), message.bulkstr().size()).data();
     }
     
     return RESPSimpleString("PONG");
 }
 
+static std::string get_response2(const std::string &query)
+{
+    CommandExecutor ce;
+    ce.ReceiveRequest(query);
+
+    return ce.Execute();
+}
+
 static void receive_and_send(int fd)
 {
     std::cout << "Client connected\n";
-    
+
+    fd_set readfds;
+    FD_ZERO(&readfds);
+    FD_SET(fd, &readfds);
+    struct timeval timeout;
+    timeout.tv_sec = 2;
+    timeout.tv_usec = 0;
+
     char buffer[4096] = {0};
     while (true)
     {
+        select(fd + 1, &readfds, NULL, NULL, &timeout);
         ssize_t recv_bytes = recv(fd, (void*)buffer, 4095, 0);
-        if (recv_bytes <= 0)
+        if (recv_bytes < 0)
         {
-            std::cerr << "Receive from client failed\n";
+            std::cerr << "Receive from client failed: " << errno << ", msg: " << strerror(errno) << std::endl;
             break;
+        }
+        else if (recv_bytes == 0)
+        {
+            continue;
         }
         
         buffer[recv_bytes] = '\0';
         std::string received_data(buffer);
         
-        std::string response = get_response(received_data);
-        // std::cout << "response:\n" << response << "\nclient_fd: " << client_fd << std::endl;
+//        std::string response = get_response(received_data);
+        std::string response = get_response2(received_data);
         ssize_t sent_bytes = send(fd, response.c_str(), response.size(), 0);
     }
 
@@ -124,7 +145,6 @@ int main(int argc, char **argv) {
         }
 
         std::thread t(receive_and_send, client_fd);
-
         
         list_client_fd.push_back(client_fd);
         t.detach();        

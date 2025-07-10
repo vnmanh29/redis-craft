@@ -161,12 +161,14 @@ public:
   {
       buffer_t buf;
       buf.append("$");
-      buf.append("\r\n");
 
       char size_str[24] = {0};
       std::snprintf(size_str, 23, "%u", (unsigned int)size);
+      buf.append(size_str);
+
+      buf.append("\r\n");
       buf.append(str);
-      buf.appedn("\r\n");
+      buf.append("\r\n");
       return buf;
   }
 
@@ -320,7 +322,7 @@ public:
 private:
   std::vector<buffer_t>* buffers_;
   std::vector<buffer_t> cmd_args_;
-  buffer_t str_;
+
 };
 }
 

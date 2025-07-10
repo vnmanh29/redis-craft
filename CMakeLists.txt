@@ -16,3 +16,4 @@ target_link_libraries(server PRIVATE asio asio::asio)
 target_link_libraries(server PRIVATE Threads::Threads)
 
 target_include_directories(server PRIVATE src/resp)
+target_include_directories(server PRIVATE src/)

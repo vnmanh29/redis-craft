@@ -85,6 +85,7 @@ public:
     if (!is_ref())
     {
       std::memcpy(data_, other.data_, size_);
+      std::memcpy(small_, other.small_, RESP_SMALL_BUFFER_SIZE);
     }
   }
 
@@ -344,7 +345,7 @@ public:
   // manhnv4 method
   buffer to_upper() const
   {
-    buffer buf = (*this);
+    buffer buf(*this);
 
     for (int i = 0;i < size_; ++i)
     {
