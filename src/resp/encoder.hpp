@@ -148,6 +148,28 @@ public:
     return buffers;
   }
 
+  buffer_t encode_simple_str(buffer_t const& str)
+  {
+      buffer_t buf;
+      buf.append("+");
+      buf.append(str);
+      buf.append("\r\n");
+      return buf;
+  }
+
+  buffer_t encode_bulk_str(buffer_t const& str, size_t size)
+  {
+      buffer_t buf;
+      buf.append("$");
+      buf.append("\r\n");
+
+      char size_str[24] = {0};
+      std::snprintf(size_str, 23, "%u", (unsigned int)size);
+      buf.append(str);
+      buf.appedn("\r\n");
+      return buf;
+  }
+
 public:
   class command
   {
@@ -298,6 +320,7 @@ public:
 private:
   std::vector<buffer_t>* buffers_;
   std::vector<buffer_t> cmd_args_;
+  buffer_t str_;
 };
 }
 

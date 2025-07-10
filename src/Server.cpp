@@ -37,9 +37,12 @@ static std::string get_response(const std::string& data)
         resp::unique_value message = arr[1];
 
           /// User's buffers.
-        std::vector<resp::buffer> buffers;
-        resp::encoder<resp::buffer>::append(buffers, message.bulkstr());
-        return buffers[0].data();
+//        std::vector<resp::buffer> buffers;
+//        resp::encoder<resp::buffer>::append(buffers, message.bulkstr());
+//        return buffers[0].data();
+
+        resp::encoder<resp::buffer> encoder;
+        return encoder.encode_simple_str(message.bulkstr()).data();
     }
     
     return RESPSimpleString("PONG");
