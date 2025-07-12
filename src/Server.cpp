@@ -13,41 +13,9 @@
 
 #include "all.hpp"
 #include "CommandExecutor.h"
+#include "RedisOption.h"
 
 #define CRLF "\r\n"
-
-static std::string RESPSimpleString(const std::string& s)
-{
-    return "+" + s + CRLF;
-}
-
-static std::string get_response(const std::string& data)
-{
-    // decode the RESP-data
-    resp::decoder dec;
-    resp::result res = dec.decode(data.c_str(), data.size());
-    resp::unique_value rep = res.value();
-
-    // cast to array
-    resp::unique_array<resp::unique_value> arr = rep.array();
-
-    // identify the command
-    if (arr[0].bulkstr().to_upper() == "ECHO")
-    {
-        // get the arg of command echo
-        resp::unique_value message = arr[1];
-
-//        std::vector<resp::buffer> buffers;
-//        resp::encoder<resp::buffer>::append(buffers, message.bulkstr());
-//        return buffers[0].data();
-
-        /// User's buffers.
-        resp::encoder<resp::buffer> encoder;
-        return encoder.encode_bulk_str(message.bulkstr(), message.bulkstr().size()).data();
-    }
-    
-    return RESPSimpleString("PONG");
-}
 
 static std::string get_response2(const std::string &query)
 {
@@ -85,8 +53,7 @@ static void receive_and_send(int fd)
         
         buffer[recv_bytes] = '\0';
         std::string received_data(buffer);
-        
-//        std::string response = get_response(received_data);
+
         std::string response = get_response2(received_data);
         ssize_t sent_bytes = send(fd, response.c_str(), response.size(), 0);
     }
@@ -94,10 +61,73 @@ static void receive_and_send(int fd)
     close(fd);
 }
 
+static int redis_parse_options(int argc, char** argv, std::shared_ptr<RedisConfig> cfg)
+{
+    int idx = 1;
+    while (idx < argc)
+    {
+        char* arg = argv[idx];
+        if (arg[0] == '-' && arg[1] == '-' && (&arg[2]))
+        {
+            /// get the name of option, find this option and set the value
+            std::string name = static_cast<std::string>(&arg[2]);
+            if (idx + 1 >= argc)
+            {
+                printf("%s, %d\n", __func__, __LINE__);
+                return -1;
+            }
+            
+            const char* val = argv[++idx];
+            const RedisOptionDef* opt = find_redis_option(redis_options, name.c_str());
+            if (opt)
+            {
+                opt->func_arg(cfg.get(), val);
+            }
+            else
+            {
+                fprintf(stderr, "%s, %d, idx %d, name %s\n", __func__, __LINE__, idx, name.c_str());
+                return -1;
+            }
+        }
+        else
+        {
+            
+            /// TODO: handle another format
+            fprintf(stderr, "%s, %d, idx %d\n", __func__, __LINE__, idx);
+            return -2;
+        }
+
+        ++idx;
+    }
+
+    return 0;
+}
+
+static void redis_set_global_config(const std::shared_ptr<RedisConfig>& cfg)
+{
+    Database::GetInstance()->SetConfig(cfg);
+}
+
 int main(int argc, char **argv) {
     // Flush after every std::cout / std::cerr
     std::cout << std::unitbuf;
     std::cerr << std::unitbuf;
+
+    /// parse the argv
+
+    std::shared_ptr<RedisConfig> cfg = std::make_shared<RedisConfig>();
+    int ret = redis_parse_options(argc, argv, cfg);
+    if (ret < 0)
+    {
+        fprintf(stderr, "Invalid parameters, total %d ret %d\n", argc, ret);
+        for (int i = 0;i < argc; ++i)
+        {
+            fprintf(stderr, "arg %d: %s\n", i, argv[i]);
+        }
+        return -1;
+    }
+
+    redis_set_global_config(cfg);
 
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) {

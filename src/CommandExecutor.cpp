@@ -33,6 +33,23 @@ void CommandExecutor::ReceiveRequest(const std::string &request) {
     {
         query_.cmd_type = PingCmd;
     }
+    else if (std::strcmp(cmd.data(), "CONFIG") == 0)
+    {
+        std::string sub_cmd = query_.cmd_args.size() > 1 ? query_.cmd_args[1] : "";
+        std::transform(sub_cmd.begin(), sub_cmd.end(), sub_cmd.begin(), ::toupper);
+        if (std::strcmp(sub_cmd.data(), "GET") == 0)
+        {
+            query_.cmd_type = GetConfigCmd;
+        }
+        else if (std::strcmp(sub_cmd.data(), "SET") == 0)
+        {
+            query_.cmd_type = SetConfigCmd;
+        }
+        else
+        {
+            query_.cmd_type = UnknownCmd;
+        }
+    }
     else
     {
         query_.cmd_type = UnknownCmd;

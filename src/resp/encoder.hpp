@@ -291,7 +291,7 @@ public:
     }
 
     buffer_t& buffer = buffers.back();
-    buffer.append(ty);
+    buffer.append(1, ty);
 
     char size_str[24];
     std::sprintf(size_str, "%u", (unsigned int)size);
@@ -318,6 +318,21 @@ public:
   {
     return cmd_args_;
   }
+
+
+  /// encode redis arg(s)
+  std::vector<buffer_t> encode_arr(std::vector<buffer_t> const& args)
+  {
+      std::vector<buffer_t> buffers;
+      buffers.reserve(args.size());
+      append_size(buffers, '*', args.size());
+      for (int i = 0;i < args.size(); ++i)
+      {
+          append(buffers, args[i]);
+      }
+      return buffers;
+  }
+
 
 private:
   std::vector<buffer_t>* buffers_;

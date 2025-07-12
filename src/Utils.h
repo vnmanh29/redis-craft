@@ -13,6 +13,8 @@ enum CommandType
     GetCmd,
     SetCmd,
     PingCmd,
+    GetConfigCmd,
+    SetConfigCmd,
     UnknownCmd
 };
 

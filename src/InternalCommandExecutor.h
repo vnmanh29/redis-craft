@@ -8,7 +8,7 @@
 #include <memory>
 #include <chrono>
 #include "all.hpp"
-//#include "CommandExecutor.h"
+
 #include "Utils.h"
 #include "Database.h"
 
@@ -135,6 +135,42 @@ class PingCommandExecutor : public AbstractInternalCommandExecutor
             return {};
 
         return "+PONG\r\n";
+    }
+};
+
+class GetConfigCommandExecutor : public AbstractInternalCommandExecutor
+{
+    std::string execute(const Query& query) override
+    {
+        if (query.cmd_args.size() < 2)
+            return "!12\r\nInvalid args\r\n";
+
+        std::vector<std::string> configs;
+        for (int i = 2;i < query.cmd_args.size(); ++i)
+        {
+            std::string property = query.cmd_args[i];
+            std::string cfg = Database::GetInstance()->GetConfigFromName(property);
+            if (cfg.empty())
+            {
+                /// return invalid
+                return "!12\r\nInvalid args\r\n";
+            }
+            else
+            {
+                configs.push_back(property);
+                configs.push_back(cfg);
+            }
+        }
+
+        resp::encoder<std::string> enc;
+        std::vector<std::string> replies = enc.encode_arr(configs);
+        std::string response;
+        for (auto& rely : replies)
+        {
+            response += rely;
+        }
+
+        return response;
     }
 };
 

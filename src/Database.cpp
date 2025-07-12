@@ -45,4 +45,26 @@ std::string Database::RetrieveValueOfKey(const std::string& key) {
     }
 }
 
+int Database::SetConfig(const std::shared_ptr<RedisConfig> &cfg) {
+    std::lock_guard lock(m_);
+    rdb_cfg_ = cfg;
+    return 0;
+}
+
+std::string Database::GetConfigFromName(const std::string &property) {
+    std::lock_guard lock(m_);
+    if (property == "dir")
+    {
+        return rdb_cfg_->dir_path;
+    }
+    else if (property == "dbfilename")
+    {
+        return rdb_cfg_->dbfilename;
+    }
+    else
+    {
+        return "";
+    }
+}
+
 
