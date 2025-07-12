@@ -20,11 +20,9 @@
 
 class CommandExecutor {
 public:
-    CommandExecutor()
-    {}
+    CommandExecutor() = default;
 
-    ~CommandExecutor()
-    {}
+    ~CommandExecutor() = default;
 
     /// receive and decode
     void ReceiveRequest(const std::string& request);

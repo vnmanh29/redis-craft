@@ -16,7 +16,7 @@ private:
     static Database* instance_;
     Database() = default;
 
-    std::unordered_map<std::string, std::string> table_;
+    std::unordered_map<std::string, std::pair<std::string, int64_t>> table_;
     std::mutex m_;
 
 public:
@@ -25,7 +25,7 @@ public:
 
     static Database* GetInstance();
 
-    void SetKeyVal(const std::string& key, const std::string& val);
+    void SetKeyVal(const std::string &key, const std::string &val, int on_exist, int64_t expired_ts);
 
     std::string RetrieveValueOfKey(const std::string& key);
 };

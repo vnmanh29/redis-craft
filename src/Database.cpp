@@ -17,14 +17,32 @@ Database *Database::GetInstance() {
     return instance_;
 }
 
-void Database::SetKeyVal(const std::string& key, const std::string& val) {
+void Database::SetKeyVal(const std::string &key, const std::string &val, int on_exist, int64_t expired_ts) {
     std::lock_guard lock(m_);
-    table_[key] = val;
+    /// return when require the key exist before but actually not
+    if (on_exist == 0 && table_.find(key) != table_.end())
+        return;
+    /// return when require the key not exist before but actually yes
+    if(on_exist == 1 && table_.find(key) == table_.end())
+        return;
+    table_[key] = {val, expired_ts};
 }
 
 std::string Database::RetrieveValueOfKey(const std::string& key) {
     std::lock_guard lock(m_);
-    return table_[key];
+    try {
+        int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+        auto p = table_.at(key);
+        if (p.second > 0 && p.second < now)
+        {
+            return  "";
+        }
+        return p.first;
+    }
+    catch (std::exception& ex)
+    {
+        return "";
+    }
 }
 
 

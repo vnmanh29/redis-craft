@@ -6,7 +6,7 @@
 #define REDIS_STARTER_CPP_INTERNALCOMMANDEXECUTOR_H
 
 #include <memory>
-
+#include <chrono>
 #include "all.hpp"
 //#include "CommandExecutor.h"
 #include "Utils.h"
@@ -61,6 +61,52 @@ class GetCommandExecutor : public AbstractInternalCommandExecutor
 
 class SetCommandExecutor : public AbstractInternalCommandExecutor
 {
+private:
+    typedef struct Options
+    {
+        int set_on_exist;
+        int64_t expired_ts;
+        Options() : set_on_exist(-1), expired_ts(0) {}
+    } Options;
+
+    int ParseArgs(std::vector<std::string>& args, Options& opts)
+    {
+        for (size_t i = 2;i < args.size(); ++i)
+        {
+            std::string arg = args[i];
+            std::transform(arg.begin(), arg.end(), arg.begin(), ::toupper);
+            if (arg == "NX")
+            {
+                if (opts.set_on_exist == 1)
+                    return -1;
+                opts.set_on_exist = 0;
+            }
+            else if (arg == "XX")
+            {
+                if (opts.set_on_exist == 0)
+                    return -1;
+                opts.set_on_exist = 1;
+            }
+            else if (arg == "EX")
+            {
+                if (opts.expired_ts != 0 || i + 1 >= args.size())
+                    return -1;
+
+                opts.expired_ts = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count() + stoll(args[i+1]) * 1000;
+                ++i;
+            }
+            else if (arg == "PX")
+            {
+                if (opts.expired_ts != 0 || i + 1 >= args.size())
+                    return -1;
+                opts.expired_ts = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count() + stoll(args[i+1]);
+                ++i;
+            }
+        }
+
+        return 0;
+    }
+public:
     std::string execute(const Query& query) override
     {
         if (query.cmd_args.size() < 3)
@@ -68,7 +114,14 @@ class SetCommandExecutor : public AbstractInternalCommandExecutor
         auto key = query.cmd_args[1];
         auto val = query.cmd_args[2];
 
-        Database::GetInstance()->SetKeyVal(key, val);
+        /// parse the args
+        std::vector<std::string> args = std::ref(query.cmd_args);
+        Options opts;
+        int ret = ParseArgs(args, opts);
+        if (ret < 0)
+            return "!12\r\nInvalid args\r\n";
+
+        Database::GetInstance()->SetKeyVal(key, val, opts.set_on_exist, opts.expired_ts);
 
         return "+OK\r\n";
     }
