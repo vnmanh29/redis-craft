@@ -55,6 +55,7 @@ static void receive_and_send(int fd)
         std::string received_data(buffer);
 
         std::string response = get_response2(received_data);
+        
         ssize_t sent_bytes = send(fd, response.c_str(), response.size(), 0);
     }
 

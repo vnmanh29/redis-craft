@@ -7,6 +7,8 @@
 
 #include <memory>
 #include <chrono>
+#include <iostream>
+
 #include "all.hpp"
 
 #include "Utils.h"
@@ -41,12 +43,16 @@ class GetCommandExecutor : public AbstractInternalCommandExecutor
     std::string execute(const Query& query) override
     {
         if (query.cmd_args.size() < 2)
+        {
+            std::cout << "GetCommandExecutor: Invalid number of arguments" << std::endl;
             return "";
+        }
 
         std::string resp = Database::GetInstance()->RetrieveValueOfKey(query.cmd_args[1]);
 
         if (resp.empty())
         {
+            std::cout << "GetCommandExecutor: Key not found" << std::endl;
             return "$-1\r\n"; // RESP format for nil
         }
         else

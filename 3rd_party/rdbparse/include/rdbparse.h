@@ -40,7 +40,7 @@ struct ParsedResult {
   void set_expiresize(uint32_t _exire_size) {
     expire_size = _exire_size;
   }
-  void set_expiretime(int _expire_time) {
+  void set_expiretime(int64_t _expire_time) {
     expire_time = _expire_time;
   }
   void set_freq(uint32_t _freq) {

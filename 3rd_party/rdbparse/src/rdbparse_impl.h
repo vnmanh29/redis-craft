@@ -75,7 +75,7 @@ class RdbParseImpl : public RdbParse {
     ParsedResult *Value(); 
     void ResetResult(); 
     Status Read(uint64_t len, Slice *result, char *scratch);
-    Status LoadExpiretime(uint8_t type, int *expire_time); 
+    Status LoadExpiretime(uint8_t type, int64_t *expire_time); 
     Status LoadEntryType(uint8_t *type);
     Status LoadEntryDBNum(uint8_t *db_num);
     Status LoadEntryKey(std::string *result);     

@@ -177,19 +177,19 @@ Status RdbParseImpl::Read(uint64_t len, Slice *result, char *scratch) {
   }
   return s;
 }
-Status RdbParseImpl::LoadExpiretime(uint8_t type, int *expire_time) {
+Status RdbParseImpl::LoadExpiretime(uint8_t type, int64_t *expire_time) {
   char buf[8];
   Status s;
   if (type == kExpireMs) {
     uint64_t t64;  
     s = Read(8, nullptr, buf); 
     memcpy(&t64, buf, 8);
-    *expire_time = static_cast<int>(t64/1000); 
+    *expire_time = static_cast<int64_t>(t64); 
   } else {
     uint32_t t32;
     s = Read(4, nullptr, buf); 
     memcpy(&t32, buf, 4);
-    *expire_time = static_cast<int>(t32);
+    *expire_time = static_cast<int64_t>(t32*1000); // convert to ms
   }
   return s; 
 }
@@ -647,7 +647,7 @@ Status RdbParseImpl::Next() {
     }
     // set expire time
     if (type == kExpireMs || type == kExpireSec) {
-      int expire_time;
+      int64_t expire_time;
       if (!LoadExpiretime(type, &expire_time).ok()) {
         return Status::Corruption("parse expire time error");
       }
