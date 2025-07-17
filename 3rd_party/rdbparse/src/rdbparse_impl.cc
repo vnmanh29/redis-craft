@@ -18,7 +18,7 @@ void ParsedResult::Debug() {
   if (!type_set.count(this->type)) {
     return;
   }
-  printf("db_num:%d, expire_time: %d, type: %s, key: %s,", this->db_num, this->expire_time, this->type.c_str(), this->key.c_str()); 
+  printf("db_num:%d, expire_time: %ld, type: %s, key: %s,", this->db_num, this->expire_time, this->type.c_str(), this->key.c_str()); 
   if (this->type == "string") {
     printf("value: %s\n", this->kv_value.c_str());
   } else if (this->type == "hash") {

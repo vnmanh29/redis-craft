@@ -294,7 +294,7 @@ public:
     buffer.append(1, ty);
 
     char size_str[24];
-    std::sprintf(size_str, "%u", (unsigned int)size);
+    std::snprintf(size_str, 24, "%u", (unsigned int)size);
     buffer.append(size_str);
     buffer.append("\r\n");
   }

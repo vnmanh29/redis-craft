@@ -27,10 +27,29 @@ static int opt_dbfilename(RedisConfig* redis_cfg, const char* arg)
     return -1;
 }
 
+static int opt_port(RedisConfig* redis_cfg, const char* arg)
+{
+    if (redis_cfg)
+    {
+        try
+        {
+            redis_cfg->port = std::stoi(arg);
+            return 0;
+        }
+        catch (const std::exception& e)
+        {
+            return -1; // Invalid port number
+        }
+    }
+
+    return -1;
+}
+
 const RedisOptionDef redis_options[] =
         {
                 {"dir", opt_dir},
                 {"dbfilename", opt_dbfilename},
+                {"port", opt_port},
                 {nullptr}
         };
 

@@ -19,6 +19,9 @@ AbstractInternalCommandExecutor::createCommandExecutor(const CommandType cmd_typ
             return std::make_shared<GetConfigCommandExecutor>();
         case KeysCmd:
             return std::make_shared<KeysCommandExecutor>();
+        default:
+            std::cerr << "Unknown command type: " << cmd_type << std::endl;
+            break;
     }
 
     return nullptr;
