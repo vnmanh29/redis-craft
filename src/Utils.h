@@ -7,15 +7,18 @@
 
 #include "all.hpp"
 
+#define CRLF "\r\n"
+
 enum CommandType
 {
     EchoCmd = 0,
     GetCmd,
     SetCmd,
     PingCmd,
-    GetConfigCmd,
-    SetConfigCmd,
+    ConfigGetCmd,
+    ConfigSetCmd,
     KeysCmd,
+    InfoCmd,
     UnknownCmd
 };
 

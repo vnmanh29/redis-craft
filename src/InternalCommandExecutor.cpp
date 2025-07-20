@@ -15,10 +15,12 @@ AbstractInternalCommandExecutor::createCommandExecutor(const CommandType cmd_typ
             return std::make_shared<SetCommandExecutor>();
         case PingCmd:
             return std::make_shared<PingCommandExecutor>();
-        case GetConfigCmd:
+        case ConfigGetCmd:
             return std::make_shared<GetConfigCommandExecutor>();
         case KeysCmd:
             return std::make_shared<KeysCommandExecutor>();
+        case InfoCmd:
+            return std::make_shared<InfoCommandExecutor>();
         default:
             std::cerr << "Unknown command type: " << cmd_type << std::endl;
             break;

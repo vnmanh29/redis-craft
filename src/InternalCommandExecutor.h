@@ -13,6 +13,7 @@
 
 #include "Utils.h"
 #include "Database.h"
+#include "Server.h"
 
 class AbstractInternalCommandExecutor : public std::enable_shared_from_this<AbstractInternalCommandExecutor>
 {
@@ -199,6 +200,30 @@ class KeysCommandExecutor : public AbstractInternalCommandExecutor
         }
 
         return response;
+    }
+};
+
+class InfoCommandExecutor : public AbstractInternalCommandExecutor
+{
+    std::string execute(const Query& query) override
+    {
+        std::string section = "default";
+        if (query.cmd_args.size() > 2)
+        {
+            return "!12\r\nInvalid args\r\n";
+        }
+        else if (query.cmd_args.size() == 2)
+        {
+            section = query.cmd_args[1];
+        }
+
+        if (section == "replication")
+        {
+            /// show the info of server
+            std::string replication_info = Server::GetInstance()->ShowReplicationInfo();
+            resp::encoder<std::string> enc;
+            return enc.encode_bulk_str(replication_info, replication_info.size());
+        }
     }
 };
 

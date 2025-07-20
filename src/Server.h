@@ -1,0 +1,61 @@
+//
+// Created by Manh Nguyen Viet on 7/20/25.
+//
+
+#ifndef REDIS_STARTER_CPP_SERVER_H
+#define REDIS_STARTER_CPP_SERVER_H
+
+#include <mutex>
+#include <vector>
+#include <memory>
+
+#include "RedisOption.h"
+
+typedef struct ReplicationInfo
+{
+    enum ReplicationRole {
+        Master = 0,
+        Slave
+    };
+    ReplicationRole role;
+    int connected_slaves;
+    std::string master_replid;
+    int64_t master_repl_offset;
+
+    // default constructor
+    ReplicationInfo() : role(Master), connected_slaves(0), master_repl_offset(0) {}
+} ReplicationInfo;
+
+
+class Server {
+private:
+    static Server* instance_;
+    static std::mutex m_;
+
+    int server_fd_;
+    std::vector<int> client_fds_;
+    int port_;
+
+    ReplicationInfo replication_info_;
+
+private:
+    Server() = default;
+
+public:
+    Server& operator=(const Server& sv) = delete;
+    Server(const Server& rhs) = delete;
+
+    ~Server();
+
+    static Server* GetInstance();
+
+    /// start the Redis server, already to listen all command after the preparing
+    int Start();
+
+    void SetConfig(const std::shared_ptr<RedisConfig>& cfg);
+
+    std::string ShowReplicationInfo() const;
+};
+
+
+#endif //REDIS_STARTER_CPP_SERVER_H

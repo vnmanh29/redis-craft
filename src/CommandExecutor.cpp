@@ -39,11 +39,11 @@ void CommandExecutor::ReceiveRequest(const std::string &request) {
         std::transform(sub_cmd.begin(), sub_cmd.end(), sub_cmd.begin(), ::toupper);
         if (std::strcmp(sub_cmd.data(), "GET") == 0)
         {
-            query_.cmd_type = GetConfigCmd;
+            query_.cmd_type = ConfigGetCmd;
         }
         else if (std::strcmp(sub_cmd.data(), "SET") == 0)
         {
-            query_.cmd_type = SetConfigCmd;
+            query_.cmd_type = ConfigSetCmd;
         }
         else
         {
@@ -53,6 +53,10 @@ void CommandExecutor::ReceiveRequest(const std::string &request) {
     else if (std::strcmp(cmd.data(), "KEYS") == 0)
     {
         query_.cmd_type = KeysCmd;
+    }
+    else if (std::strcmp(cmd.data(), "INFO") == 0)
+    {
+        query_.cmd_type = InfoCmd;
     }
     else
     {

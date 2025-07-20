@@ -20,7 +20,7 @@ private:
     Database() = default;
 
     std::unordered_map<std::string, std::shared_ptr<RdbParser::ParsedResult>> table_;
-    std::mutex m_;
+    static std::mutex m_;
 
     std::shared_ptr<RedisConfig> rdb_cfg_;
 

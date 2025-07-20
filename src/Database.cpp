@@ -11,8 +11,10 @@
 
 // Initialize static member outside the class
 Database *Database::instance_ = nullptr;
+std::mutex Database::m_;
 
 Database *Database::GetInstance() {
+    std::lock_guard lock(m_);
     if (instance_ == nullptr) {
         instance_ = new Database();
     }
@@ -84,7 +86,6 @@ int Database::SetConfig(const std::shared_ptr<RedisConfig> &cfg) {
             RdbParser::ParsedResult *value = parse->Value();
             // value->Debug();
             std::string key = value->key;
-            // printf("\nresult [%p], key %s\n", value, key.c_str());
             if (key.empty()) {
                 continue; // skip empty keys
             }
