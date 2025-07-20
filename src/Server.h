@@ -22,8 +22,13 @@ typedef struct ReplicationInfo
     std::string master_replid;
     int64_t master_repl_offset;
 
+    // If the instance is a replica, these additional fields are provided
+    int is_replica;
+    std::string master_host;
+    int master_port;
+
     // default constructor
-    ReplicationInfo() : role(Master), connected_slaves(0), master_repl_offset(0) {}
+    ReplicationInfo() : role(Master), connected_slaves(0), master_repl_offset(0), is_replica(0) {}
 } ReplicationInfo;
 
 

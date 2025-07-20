@@ -3,7 +3,10 @@
 //
 
 #include "RedisOption.h"
+
 #include <cstring>
+#include <sstream>
+#include <iostream>
 
 static int opt_dir(RedisConfig* redis_cfg, const char* arg)
 {
@@ -45,11 +48,35 @@ static int opt_port(RedisConfig* redis_cfg, const char* arg)
     return -1;
 }
 
+static int opt_replicaof(RedisConfig* redis_cfg, const char* arg)
+{
+    if (redis_cfg)
+    {
+        try {
+            std::stringstream ss(static_cast<std::string>(arg));
+
+            ss >> redis_cfg->master_host >> redis_cfg->master_port;
+
+            redis_cfg->is_replica = 1;
+
+            return 0;
+        }
+        catch (std::exception& ex)
+        {
+            std::cerr << "Invalid arguments of option replicaof" << std::endl;
+            return -1; /// invalid argument
+        }
+    }
+
+    return -1;
+}
+
 const RedisOptionDef redis_options[] =
         {
                 {"dir", opt_dir},
                 {"dbfilename", opt_dbfilename},
                 {"port", opt_port},
+                {"replicaof", opt_replicaof},
                 {nullptr}
         };
 

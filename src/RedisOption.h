@@ -12,7 +12,12 @@ typedef struct RedisConfig
     std::string dir_path;
     std::string dbfilename;
     int port;
-    RedisConfig() : port(6379) {} // Default port is 6379
+
+    int is_replica;
+    std::string master_host;
+    int master_port;
+
+    RedisConfig() : port(6379), is_replica(0) {} // Default port is 6379
 } RedisConfig;
 
 typedef struct RedisOptionDef

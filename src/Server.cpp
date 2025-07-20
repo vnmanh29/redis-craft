@@ -130,6 +130,15 @@ void Server::SetConfig(const std::shared_ptr<RedisConfig> &cfg) {
     if (cfg) {
         /// TODO: add more config properties belong to network???
         port_ = cfg->port;
+
+        if (cfg->is_replica)
+        {
+            replication_info_.role = ReplicationInfo::ReplicationRole::Slave;
+
+            replication_info_.is_replica = cfg->is_replica;
+            replication_info_.master_host = cfg->master_host;
+            replication_info_.master_port = cfg->master_port;
+        }
     }
 }
 
@@ -142,6 +151,12 @@ std::string Server::ShowReplicationInfo() const {
     ss << "connected_slave:" << replication_info_.connected_slaves << CRLF;
     ss << "master_replid:" << replication_info_.master_replid << CRLF;
     ss << "master_repl_offset:" << replication_info_.master_repl_offset << CRLF;
+
+    if (replication_info_.is_replica)
+    {
+        ss << "master_host:" << replication_info_.master_host << CRLF;
+        ss << "master_port:" << replication_info_.master_port << CRLF;
+    }
 
     return ss.str();
 }
