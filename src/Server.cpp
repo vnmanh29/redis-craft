@@ -34,6 +34,9 @@ Server::~Server() {
     for (int &fd: client_fds_) {
         close(fd);
     }
+
+    close(replica_fd_);
+
     close(server_fd_);
 }
 
@@ -159,4 +162,57 @@ std::string Server::ShowReplicationInfo() const {
     }
 
     return ss.str();
+}
+
+int Server::Setup() {
+    /// 1. setup the replica
+    int ret = SetupReplica();
+
+    return ret;
+}
+
+int Server::SetupReplica() {
+    if (!replication_info_.is_replica)
+        return 0;
+
+    replica_fd_ = socket(AF_INET, SOCK_STREAM, 0);
+    if (replica_fd_ < 0)
+    {
+        std::cerr << "Fail to create replica fd" << std::endl;
+        return -1;
+    }
+
+    // Step 2: Resolve hostname to IP address
+    struct hostent *master_server = gethostbyname(replication_info_.master_host.c_str());
+    if (master_server == NULL) {
+        fprintf(stderr, "No such host: %s\n", replication_info_.master_host.c_str());
+        return -2;
+    }
+
+    // Step 3: Set up the sockaddr_in struct
+    struct sockaddr_in master_addr;
+    memset(&master_addr, 0, sizeof(master_addr));
+    master_addr.sin_family = AF_INET;
+    master_addr.sin_port = htons(replication_info_.master_port);
+    master_addr.sin_addr.s_addr = INADDR_ANY;
+//    memcpy(&master_addr.sin_addr.s_addr, master_server->h_addr, master_server->h_length);
+
+    // Step 4: Connect to the server
+    if (connect(replica_fd_, (struct sockaddr*)&master_addr, sizeof(master_addr)) < 0) {
+        perror("connect failed");
+        return -3;
+    }
+
+    // Step 5: send data to the server
+    std::vector<std::string> raw_msg = {"ping"};
+    std::string msg = EncodeArr2RespArr(raw_msg);
+    if (send(replica_fd_, msg.c_str(), msg.size(), 0) < 0)
+    {
+        fprintf(stderr, "send %s fail\n", msg.c_str());
+        return -4;
+    }
+
+//    std::cout << "Data sent: " << msg.c_str() << std::endl;
+
+    return 0;
 }

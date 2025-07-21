@@ -6,8 +6,7 @@
 #define REDIS_STARTER_CPP_REDISOPTION_H
 
 #include <string>
-
-#define DEFAULT_MASTER_REPLID "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
+#include "Utils.h"
 
 typedef struct RedisConfig
 {
@@ -19,7 +18,7 @@ typedef struct RedisConfig
     std::string master_host;
     int master_port;
 
-    RedisConfig() : port(6379), is_replica(0) {} // Default port is 6379
+    RedisConfig() : port(DEFAULT_REDIS_PORT), is_replica(0) {} // Default port is 6379
 } RedisConfig;
 
 typedef struct RedisOptionDef

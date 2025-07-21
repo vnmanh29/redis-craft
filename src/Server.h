@@ -39,7 +39,7 @@ private:
     static Server* instance_;
     static std::mutex m_;
 
-    int server_fd_;
+    int server_fd_, replica_fd_;
     std::vector<int> client_fds_;
     int port_;
 
@@ -48,6 +48,8 @@ private:
 private:
     Server() = default;
 
+    int SetupReplica();
+
 public:
     Server& operator=(const Server& sv) = delete;
     Server(const Server& rhs) = delete;
@@ -55,6 +57,9 @@ public:
     ~Server();
 
     static Server* GetInstance();
+
+    /// initialize the server from config, include sync data from master server (if this is a replica)
+    int Setup();
 
     /// start the Redis server, already to listen all command after the preparing
     int Start();

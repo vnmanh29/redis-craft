@@ -77,6 +77,8 @@ int main(int argc, char **argv) {
 
     redis_set_global_config(cfg);
 
+    Server::GetInstance()->Setup();
+
     Server::GetInstance()->Start();
 
     return 0;
