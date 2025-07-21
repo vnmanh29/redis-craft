@@ -5,6 +5,7 @@
 #include "Server.h"
 #include "CommandExecutor.h"
 #include "Utils.h"
+#include "RedisError.h"
 
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -77,6 +78,64 @@ static void receive_and_send(int fd) {
     }
 
     close(fd);
+}
+
+int Server::HandShake(int fd)
+{
+    fd_set readfds;
+    FD_ZERO(&readfds);
+    FD_SET(fd, &readfds);
+    struct timeval timeout;
+    timeout.tv_sec = 2;
+    timeout.tv_usec = 0;
+
+    /// TODO: build the list message instead of hardcode
+    std::vector<std::vector<std::string>> handshake_msgs = {
+            {"ping"},
+            {"replconf", "listening-port", std::to_string(port_)},
+            {"replconf", "capa", "psync2"},
+            {"psync", "?", "-1"},
+            };
+
+    char buffer[4096] = {0};
+    for (int idx = 0;idx < handshake_msgs.size(); ++idx)
+    {
+        // build RESP message
+        auto& arr = handshake_msgs[idx];
+
+        auto request = EncodeArr2RespArr(arr);
+        ssize_t sent_bytes = send(fd, request.c_str(), request.size(), 0);
+        if (sent_bytes < 0)
+        {
+            std::cerr << "Make hand-shake fail at step " << idx <<std::endl;
+            return HandShakeSendError;
+        }
+//        printf("Sent %lu bytes, request %s\n", sent_bytes, request.c_str());
+
+        int ready = select(fd + 1, &readfds, NULL, NULL, &timeout);
+        if (ready < 0)
+        {
+            fprintf(stderr, "select the fail, erro %s\n", strerror(errno));
+            return HandShakeFdError;
+        }
+        ssize_t recv_bytes = recv(fd, (void *) buffer, 4095, 0);
+        if (recv_bytes < 0) {
+            std::cerr << "Receive from client failed: " << errno << ", msg: " << strerror(errno) << std::endl;
+            return HandShakeRecvError;
+        } else if (recv_bytes == 0) {
+            continue;
+        }
+
+        buffer[recv_bytes] = '\0';
+        std::string received_data(buffer);
+//        printf("Received %lu bytes: %s\n", recv_bytes, buffer);
+        /// TODO: handle received data
+
+    }
+
+    close(fd);
+
+    return 0;
 }
 
 int Server::Start() {
@@ -179,14 +238,14 @@ int Server::SetupReplica() {
     if (replica_fd_ < 0)
     {
         std::cerr << "Fail to create replica fd" << std::endl;
-        return -1;
+        return CreateSocketError;
     }
 
     // Step 2: Resolve hostname to IP address
     struct hostent *master_server = gethostbyname(replication_info_.master_host.c_str());
     if (master_server == NULL) {
         fprintf(stderr, "No such host: %s\n", replication_info_.master_host.c_str());
-        return -2;
+        return GetHostNameError;
     }
 
     // Step 3: Set up the sockaddr_in struct
@@ -194,25 +253,16 @@ int Server::SetupReplica() {
     memset(&master_addr, 0, sizeof(master_addr));
     master_addr.sin_family = AF_INET;
     master_addr.sin_port = htons(replication_info_.master_port);
-    master_addr.sin_addr.s_addr = INADDR_ANY;
-//    memcpy(&master_addr.sin_addr.s_addr, master_server->h_addr, master_server->h_length);
+//    master_addr.sin_addr.s_addr = INADDR_ANY;
+    memcpy(&master_addr.sin_addr.s_addr, master_server->h_addr, master_server->h_length);
 
     // Step 4: Connect to the server
     if (connect(replica_fd_, (struct sockaddr*)&master_addr, sizeof(master_addr)) < 0) {
         perror("connect failed");
-        return -3;
+        return SocketConnectError;
     }
 
-    // Step 5: send data to the server
-    std::vector<std::string> raw_msg = {"ping"};
-    std::string msg = EncodeArr2RespArr(raw_msg);
-    if (send(replica_fd_, msg.c_str(), msg.size(), 0) < 0)
-    {
-        fprintf(stderr, "send %s fail\n", msg.c_str());
-        return -4;
-    }
+    int ret = HandShake(replica_fd_);
 
-//    std::cout << "Data sent: " << msg.c_str() << std::endl;
-
-    return 0;
+    return ret;
 }

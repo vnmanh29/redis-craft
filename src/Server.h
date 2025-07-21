@@ -50,6 +50,8 @@ private:
 
     int SetupReplica();
 
+    int HandShake(int fd);
+
 public:
     Server& operator=(const Server& sv) = delete;
     Server(const Server& rhs) = delete;
