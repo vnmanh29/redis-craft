@@ -28,7 +28,9 @@ typedef struct ReplicationInfo
     int master_port;
 
     // default constructor
-    ReplicationInfo() : role(Master), connected_slaves(0), master_repl_offset(0), is_replica(0) {}
+    ReplicationInfo() : role(Master), connected_slaves(0), master_repl_offset(0), is_replica(0) {
+        master_replid = DEFAULT_MASTER_REPLID;
+    }
 } ReplicationInfo;
 
 
