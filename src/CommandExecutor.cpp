@@ -58,6 +58,14 @@ void CommandExecutor::ReceiveRequest(const std::string &request) {
     {
         query_.cmd_type = InfoCmd;
     }
+    else if (std::strcmp(cmd.data(), "REPLCONF") == 0)
+    {
+        query_.cmd_type = ReplcofCmd;
+    }
+    else if (std::strcmp(cmd.data(), "PSYNC") == 0)
+    {
+        query_.cmd_type = PSyncCmd;
+    }
     else
     {
         query_.cmd_type = UnknownCmd;

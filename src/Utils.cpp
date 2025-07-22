@@ -16,3 +16,10 @@ std::string EncodeArr2RespArr(std::vector<std::string>& arr)
     }
     return resp_str;
 }
+
+std::string EncodeRespSimpleStr(std::string s)
+{
+    resp::encoder<std::string> enc;
+    std::string resp_str = enc.encode_simple_str(s);
+    return resp_str;
+}

@@ -227,4 +227,26 @@ class InfoCommandExecutor : public AbstractInternalCommandExecutor
     }
 };
 
+class ReplconfCommandExecutor : public AbstractInternalCommandExecutor
+{
+    std::string execute(const Query& query) override
+    {
+        /// TODO: handle the argument
+        return "+OK\r\n";
+    }
+};
+
+class PSyncCommandExecutor : public AbstractInternalCommandExecutor
+{
+    std::string execute(const Query& query) override
+    {
+        /// if could not perform incremental replication
+        /// TODO: handle the argument
+        std::string master_repid = Server::GetInstance()->GetReplicationInfo().master_replid;
+        std::string master_repl_offset = std::to_string(Server::GetInstance()->GetReplicationInfo().master_repl_offset);
+
+        return EncodeRespSimpleStr("FULLRESYNC " + master_repid + " " + master_repl_offset);
+    }
+};
+
 #endif //REDIS_STARTER_CPP_INTERNALCOMMANDEXECUTOR_H

@@ -21,6 +21,10 @@ AbstractInternalCommandExecutor::createCommandExecutor(const CommandType cmd_typ
             return std::make_shared<KeysCommandExecutor>();
         case InfoCmd:
             return std::make_shared<InfoCommandExecutor>();
+        case ReplcofCmd:
+            return std::make_shared<ReplconfCommandExecutor>();
+        case PSyncCmd:
+            return std::make_shared<PSyncCommandExecutor>();
         default:
             std::cerr << "Unknown command type: " << cmd_type << std::endl;
             break;

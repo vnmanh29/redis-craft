@@ -69,6 +69,10 @@ public:
     void SetConfig(const std::shared_ptr<RedisConfig>& cfg);
 
     std::string ShowReplicationInfo() const;
+
+    inline ReplicationInfo GetReplicationInfo() const {
+        return replication_info_;
+    }
 };
 
 

@@ -22,6 +22,8 @@ enum CommandType
     ConfigSetCmd,
     KeysCmd,
     InfoCmd,
+    ReplcofCmd,
+    PSyncCmd,
     UnknownCmd
 };
 
@@ -33,5 +35,7 @@ typedef struct Query
 
 /// input: array of strings. Output: a string presents RESP Array
 std::string EncodeArr2RespArr(std::vector<std::string>& arr);
+
+std::string EncodeRespSimpleStr(std::string s);
 
 #endif //REDIS_STARTER_CPP_UTILS_H
