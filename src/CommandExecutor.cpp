@@ -3,9 +3,24 @@
 //
 
 #include "CommandExecutor.h"
+#include "RedisError.h"
 
-void CommandExecutor::ReceiveRequest(const std::string &request) {
-    resp::result res = decoder_.decode(request.c_str(), request.size());
+int CommandExecutor::ReceiveData(const std::string &buffer) {
+    /// append new data to the last. Useful in case the last data
+    data_ = data_ + buffer;
+    resp::result res = decoder_.decode(data_.c_str(), data_.size());
+    if (res == resp::incompleted)
+    {
+        fprintf(stdout, "Received buffer %s. Incompleted RESP with data %s\n", buffer.c_str(), data_.c_str());
+        return IncompletedCommand;
+    }
+
+    if (res == resp::error)
+    {
+        fprintf(stderr, "Received buffer %s. Invalid RESP with data %s\n", buffer.c_str(), data_.c_str());
+        return Error::InvalidCommandError;
+    }
+
     resp::unique_value rep = res.value();
 
     /// create query
@@ -70,13 +85,18 @@ void CommandExecutor::ReceiveRequest(const std::string &request) {
     {
         query_.cmd_type = UnknownCmd;
     }
+
+    return 0;
 }
 
-std::string CommandExecutor::Execute() {
+ssize_t CommandExecutor::Execute(const int fd) {
     /// create the executor suit for the current command
     internal_executor_ = AbstractInternalCommandExecutor::createCommandExecutor(query_.cmd_type);
     if (!internal_executor_)
-        return "+OK\r\n";
+        return InvalidCommandError;
+//        return "+OK\r\n";
+
+    internal_executor_->SetSocket(fd);
 
     /// execute command
     return internal_executor_->execute(query_);

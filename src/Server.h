@@ -8,8 +8,11 @@
 #include <mutex>
 #include <vector>
 #include <memory>
+#include <unistd.h>
+#include <atomic>
 
 #include "RedisOption.h"
+#include "CommandExecutor.h"
 
 typedef struct ReplicationInfo
 {
@@ -33,6 +36,20 @@ typedef struct ReplicationInfo
     }
 } ReplicationInfo;
 
+typedef struct Client
+{
+    int fd;                   /// the socket connects to this client
+    int active;
+    CommandExecutor executor; /// the executor for this client
+
+    explicit Client(int fd_) : fd(fd_), active(1)
+    {}
+
+    ~Client()
+    {
+        close(fd);
+    }
+} Client;
 
 class Server {
 private:
@@ -40,9 +57,11 @@ private:
     static std::mutex m_;
 
     int server_fd_, replica_fd_;
-    std::vector<int> client_fds_;
+    std::vector<std::shared_ptr<Client>> clients_;
+    std::mutex clients_mutex_;
     int port_;
 
+    std::atomic_bool listening_;
     ReplicationInfo replication_info_;
 
 private:
@@ -51,6 +70,8 @@ private:
     int SetupReplica();
 
     int HandShake(int fd);
+
+    int ReceiveAndReply();
 
 public:
     Server& operator=(const Server& sv) = delete;
@@ -67,6 +88,9 @@ public:
     int Start();
 
     void SetConfig(const std::shared_ptr<RedisConfig>& cfg);
+
+    /// send data over file descriptor fd. return < 0 while fail, otherwise return the total sent size
+    static ssize_t SendData(const int fd, const std::string& response);
 
     std::string ShowReplicationInfo() const;
 

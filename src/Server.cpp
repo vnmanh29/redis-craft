@@ -12,6 +12,8 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <netinet/tcp.h> // Required for TCP_NODELAY
 
 #include <cstdlib>
 #include <cstring>
@@ -32,9 +34,6 @@ Server *Server::GetInstance() {
 }
 
 Server::~Server() {
-    for (int &fd: client_fds_) {
-        close(fd);
-    }
 
     close(replica_fd_);
 
@@ -43,9 +42,9 @@ Server::~Server() {
 
 static std::string get_response2(const std::string &query) {
     CommandExecutor ce;
-    ce.ReceiveRequest(query);
+//    ce.ReceiveRequest(query);
 
-    return ce.Execute();
+//    return ce.Execute();
 }
 
 static void receive_and_send(int fd) {
@@ -76,8 +75,6 @@ static void receive_and_send(int fd) {
 
         ssize_t sent_bytes = send(fd, response.c_str(), response.size(), 0);
     }
-
-    close(fd);
 }
 
 int Server::HandShake(int fd)
@@ -139,6 +136,9 @@ int Server::HandShake(int fd)
 }
 
 int Server::Start() {
+    listening_ = true;
+//    std::thread t(&Server::ReceiveAndReply, this);
+
     server_fd_ = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd_ < 0) {
         std::cerr << "Failed to create server socket\n";
@@ -163,6 +163,13 @@ int Server::Start() {
         return 1;
     }
 
+    // Set the server socket to non-blocking mode
+    if (fcntl(server_fd_, F_SETFL, O_NONBLOCK) < 0) {
+        perror("fcntl failed");
+        close(server_fd_);
+        exit(EXIT_FAILURE);
+    }
+
     int connection_backlog = 5;
     if (listen(server_fd_, connection_backlog) != 0) {
         std::cerr << "listen failed\n";
@@ -176,16 +183,34 @@ int Server::Start() {
     while (true) {
         int client_fd = accept(server_fd_, (struct sockaddr *) &client_addr, (socklen_t *) &client_addr_len);
         if (client_fd < 0) {
-            std::cerr << "Accept failed\n";
-            return -1;
+//            std::cerr << "Accept failed\n";
+//            return -1;
+        }
+        else {
+//            int flags = fcntl(client_fd, F_GETFL, 0);
+//            if (flags == -1)
+//            {
+//                fprintf(stderr, "set client fd %d to non-blocking mode fail\n", client_fd);
+//                fflush(stderr);
+//                continue;
+//            }
+//            else
+//            {
+//                fprintf(stdout, "Connected to the client through fd %d\n", client_fd);
+//                fflush(stdout);
+//                fcntl(client_fd, F_SETFL, flags | O_NONBLOCK);
+                int yes = 1;
+                std::lock_guard lock(clients_mutex_);
+                clients_.push_back(std::make_shared<Client>(client_fd));
+//            }
         }
 
-        std::thread t(receive_and_send, client_fd);
-
-        client_fds_.push_back(client_fd);
-        t.detach();
+        ReceiveAndReply();
     }
 
+//    t.join();
+
+    return 0;
 }
 
 void Server::SetConfig(const std::shared_ptr<RedisConfig> &cfg) {
@@ -263,6 +288,164 @@ int Server::SetupReplica() {
     }
 
     int ret = HandShake(replica_fd_);
+    if (ret < 0)
+    {
+        fprintf(stderr, "Handshake fail %d\n", ret);
+        return ret;
+    }
 
     return ret;
+}
+
+int Server::ReceiveAndReply() {
+//    std::cout << "Client connected in fd " << fd << std::endl;
+
+//    while (listening_.load())
+//    {
+        int max_fd = 0;
+        fd_set readfds;
+
+        struct timeval timeout;
+        timeout.tv_sec = 2;
+        timeout.tv_usec = 0;
+
+        {
+            std::lock_guard<std::mutex> lock(clients_mutex_);
+            FD_ZERO(&readfds);
+            for (const auto& client: clients_) {
+                if (client->active)
+                {
+                    FD_SET(client->fd, &readfds);
+                    max_fd = std::max(max_fd, client->fd);
+                }
+            }
+        }
+
+        char buffer[4096] = {0};
+
+        int activity = select(max_fd + 1, &readfds, NULL, NULL, &timeout);
+        if (activity <= 0)
+        {
+            return -1;
+        }
+        else
+        {
+//            std::cerr << "there are " << activity << std::endl;
+        }
+
+        std::lock_guard lock(clients_mutex_);
+        for (auto &client : clients_)
+        {
+            if (client->active == 0)
+                continue;
+
+            int fd = client->fd;
+            if (FD_ISSET(fd, &readfds))
+            {
+                ssize_t recv_bytes = recv(fd, (void *) buffer, 4095, 0);
+                if (recv_bytes < 0) {
+                    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                        // No data available yet, try again later or use select/poll/epoll
+                        // to wait for data
+                        continue;
+                    } else {
+                        // A real error occurred
+                        fprintf(stderr, "Receive from client fd %d failed: %d, msg %s\n", fd, errno, strerror(errno));
+                        continue;
+                    }
+                } else if (recv_bytes == 0) {
+                    // Connection closed by peer
+                    std::cerr << "EOF of file in fd " <<  fd << std::endl;
+                    client->active = 0;
+    //                continue;
+                    return SocketConnectError;
+                }
+
+                buffer[recv_bytes] = '\0';
+                std::string received_data(buffer);
+//                std::cout << "received data " << received_data << " in " << fd << std::endl;
+
+                /// handle the new data
+                int ret = client->executor.ReceiveData(received_data);
+                if (ret == 0)
+                {
+//                    std::cout << "execute data " << received_data << " and send through fd " << fd << std::endl;
+                    /// execute the query and respond
+                    client->executor.Execute(fd);
+                }
+                else
+                {
+                    std::cerr << "Received data " << received_data << " failed" << std::endl;
+                }
+
+                return 0;
+            }
+        }
+//    }
+
+    return 0;
+}
+
+ssize_t Server::SendData(const int fd, const std::string &response) {
+//    std::cout << "Send through fd " << fd << " response: " << response << std::endl;
+    size_t total_sent = 0, sent = 0;
+    const char* data = response.data();
+    size_t total_len = response.size();
+
+    fd_set writefds;
+    FD_ZERO(&writefds);
+    FD_SET(fd, &writefds);
+
+    struct timeval tv;
+    tv.tv_sec = 2;
+    tv.tv_usec = 0;
+
+    int activity = select(fd + 1, NULL, &writefds, NULL, &tv);
+    if (activity <= 0)
+        return SentDataError;
+
+
+    int nodelay = 1;
+    if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (char *)&nodelay, sizeof(nodelay)) < 0)
+    {
+        std::cerr << "set fd " << fd << " opt NODELAY fail" << std::endl;
+    }
+    else
+    {
+//        std::cerr << "set fd " << fd << " opt NODELAY success" << std::endl;
+    }
+
+    if (FD_ISSET(fd, &writefds))
+    {
+        while (total_sent < total_len)
+        {
+            sent = send(fd, data + total_sent, total_len - total_sent, 0);
+//            sent = write(fd, data, total_sent);
+            if (sent == -1)
+            {
+                if (errno == EWOULDBLOCK || errno == EAGAIN) {
+                    // Socket buffer is full, wait and retry later (e.g., using select/poll)
+                    // In a real application, you'd use select/poll to wait for writability
+                    // For simplicity here, we might just sleep briefly or yield control
+//                    usleep(1000); // Sleep for 1ms, for example
+                    continue; // Try sending again
+                }
+                std::cerr << "Sent " << total_sent << " bytes, error " << strerror(errno) << std::endl;
+                return Error::SentDataError;
+            }
+            else if (sent == 0)
+            {
+                return Error::SentDataError;
+            }
+            total_sent += sent;
+        }
+
+//        std::cout << "Send through fd " << fd << " successfully " << total_sent << " bytes" << std::endl;
+
+        usleep(10000);
+
+        return total_sent;
+    }
+
+    return 0;
 }

@@ -10,13 +10,12 @@
 
 #include "all.hpp"
 #include "InternalCommandExecutor.h"
+#include "Utils.h"
 
 /*
  * Receive the command, execute and return the response
  * */
 
-#include "Utils.h"
-#include "InternalCommandExecutor.h"
 
 class CommandExecutor {
 public:
@@ -24,10 +23,10 @@ public:
 
     ~CommandExecutor() = default;
 
-    /// receive and decode
-    void ReceiveRequest(const std::string& request);
+    /// receive and decode. return 0 with completed command, otherwise return the error in RedisError.h
+    int ReceiveData(const std::string& buffer);
 
-    std::string Execute();
+    ssize_t Execute(const int fd);
 
 private:
     /// private method
@@ -35,6 +34,7 @@ private:
 private:
     resp::encoder<std::string> encoder_;
     resp::decoder decoder_;
+    std::string data_;
 
     Query query_;
     std::shared_ptr<AbstractInternalCommandExecutor> internal_executor_;
