@@ -82,6 +82,8 @@ class RdbParseImpl : public RdbParse {
     Status LoadEntryValue(uint8_t type);
 
     std::string GetTypeName(ValueType type);
+
+    int GetVersion() override;
   private: 
     Status LoadLength(uint64_t *length, bool *is_encoded);
     Status LoadIntVal(uint32_t type, std::string *result); 

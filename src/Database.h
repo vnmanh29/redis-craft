@@ -20,6 +20,7 @@ private:
     Database() = default;
 
     std::unordered_map<std::string, std::shared_ptr<RdbParser::ParsedResult>> table_;
+    int version_;
     static std::mutex m_;
 
     std::shared_ptr<RedisConfig> rdb_cfg_;
@@ -42,6 +43,10 @@ public:
     std::string RetrieveValueOfKey(const std::string& key);
 
     std::vector<std::string> RetrieveKeysMatchPattern(const std::string& pattern);
+
+    ssize_t SaveRdbBackground(const std::string &file_name);
+
+    [[nodiscard]] std::string GetRdbPath() const;
 };
 
 

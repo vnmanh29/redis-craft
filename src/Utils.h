@@ -6,6 +6,7 @@
 #define REDIS_STARTER_CPP_UTILS_H
 
 #include "all.hpp"
+#include <sys/stat.h>
 
 #define CRLF "\r\n"
 #define DEFAULT_REDIS_PORT 6379
@@ -37,5 +38,15 @@ typedef struct Query
 std::string EncodeArr2RespArr(std::vector<std::string>& arr);
 
 std::string EncodeRespSimpleStr(std::string s);
+
+void ResetQuery(Query& query);
+
+int RdbStat(const std::string& file_name, struct stat& st);
+
+std::string RdbHex2Bin(const std::string& hex);
+
+std::string HexToBinary(const std::string& hexStr);
+
+void hexToBinaryData(const std::string &hexStr, std::vector<unsigned char> &binaryData);
 
 #endif //REDIS_STARTER_CPP_UTILS_H

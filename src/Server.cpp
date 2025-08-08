@@ -6,6 +6,7 @@
 #include "CommandExecutor.h"
 #include "Utils.h"
 #include "RedisError.h"
+#include "Utils.h"
 
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -13,6 +14,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/wait.h>
 #include <netinet/tcp.h> // Required for TCP_NODELAY
 
 #include <cstdlib>
@@ -48,7 +50,7 @@ static std::string get_response2(const std::string &query) {
 }
 
 static void receive_and_send(int fd) {
-    std::cout << "Client connected\n";
+    LOG_INFO(TAG, "Client connected");
 
     fd_set readfds;
     FD_ZERO(&readfds);
@@ -77,8 +79,7 @@ static void receive_and_send(int fd) {
     }
 }
 
-int Server::HandShake(int fd)
-{
+int Server::HandShake(int fd) {
     fd_set readfds;
     FD_ZERO(&readfds);
     FD_SET(fd, &readfds);
@@ -90,34 +91,30 @@ int Server::HandShake(int fd)
     std::vector<std::vector<std::string>> handshake_msgs = {
             {"ping"},
             {"replconf", "listening-port", std::to_string(port_)},
-            {"replconf", "capa", "psync2"},
-            {"psync", "?", "-1"},
-            };
+            {"replconf", "capa",           "psync2"},
+            {"psync",    "?",              "-1"},
+    };
 
     char buffer[4096] = {0};
-    for (int idx = 0;idx < handshake_msgs.size(); ++idx)
-    {
+    for (int idx = 0; idx < handshake_msgs.size(); ++idx) {
         // build RESP message
-        auto& arr = handshake_msgs[idx];
+        auto &arr = handshake_msgs[idx];
 
         auto request = EncodeArr2RespArr(arr);
         ssize_t sent_bytes = send(fd, request.c_str(), request.size(), 0);
-        if (sent_bytes < 0)
-        {
-            std::cerr << "Make hand-shake fail at step " << idx <<std::endl;
+        if (sent_bytes < 0) {
+            LOG_ERROR(TAG, "Make hand-shake fail at step %d", idx)
             return HandShakeSendError;
         }
-//        printf("Sent %lu bytes, request %s\n", sent_bytes, request.c_str());
 
         int ready = select(fd + 1, &readfds, NULL, NULL, &timeout);
-        if (ready < 0)
-        {
-            fprintf(stderr, "select the fail, erro %s\n", strerror(errno));
+        if (ready < 0) {
+            LOG_ERROR(TAG, "select the fail, errno %s", strerror(errno));
             return HandShakeFdError;
         }
         ssize_t recv_bytes = recv(fd, (void *) buffer, 4095, 0);
         if (recv_bytes < 0) {
-            std::cerr << "Receive from client failed: " << errno << ", msg: " << strerror(errno) << std::endl;
+            LOG_ERROR(TAG, "Receive from client failed: %d, msg: %s", errno, strerror(errno));
             return HandShakeRecvError;
         } else if (recv_bytes == 0) {
             continue;
@@ -137,11 +134,11 @@ int Server::HandShake(int fd)
 
 int Server::Start() {
     listening_ = true;
-//    std::thread t(&Server::ReceiveAndReply, this);
+//    std::thread t(&Server::ProcessClientData, this);
 
     server_fd_ = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd_ < 0) {
-        std::cerr << "Failed to create server socket\n";
+        LOG_ERROR(TAG, "Failed to create server socket");
         return 1;
     }
 
@@ -149,7 +146,7 @@ int Server::Start() {
     // ensures that we don't run into 'Address already in use' errors
     int reuse = 1;
     if (setsockopt(server_fd_, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
-        std::cerr << "setsockopt failed\n";
+        LOG_ERROR(TAG, "setsockopt failed");
         return 1;
     }
 
@@ -159,7 +156,7 @@ int Server::Start() {
     server_addr.sin_port = htons(port_);
 
     if (bind(server_fd_, (struct sockaddr *) &server_addr, sizeof(server_addr)) != 0) {
-        std::cerr << "Failed to bind to port 6379\n";
+        LOG_ERROR(TAG, "Failed to bind to port %d", DEFAULT_REDIS_PORT)
         return 1;
     }
 
@@ -178,37 +175,55 @@ int Server::Start() {
 
     struct sockaddr_in client_addr;
     int client_addr_len = sizeof(client_addr);
-    std::cout << "Waiting for a client to connect...\n";
+    LOG_INFO(TAG, "Waiting for a client to connect...");
 
     while (true) {
-        int client_fd = accept(server_fd_, (struct sockaddr *) &client_addr, (socklen_t *) &client_addr_len);
-        if (client_fd < 0) {
-//            std::cerr << "Accept failed\n";
-//            return -1;
+        /// check the end of child proc
+        CheckChildrenDone();
+
+        int max_fd = server_fd_;
+
+        /// initialize the read_fd
+        fd_set read_fds;
+        FD_ZERO(&read_fds);
+        /// add server socket to monitor for new connection
+        FD_SET(server_fd_, &read_fds);
+        /// add all active clients to monitor for new connection
+        {
+            std::lock_guard lock(clients_mutex_);
+            for (auto &client: clients_) {
+                if (client->active) {
+                    FD_SET(client->fd, &read_fds);
+                    max_fd = std::max(max_fd, client->fd);
+                }
+            }
         }
-        else {
-//            int flags = fcntl(client_fd, F_GETFL, 0);
-//            if (flags == -1)
-//            {
-//                fprintf(stderr, "set client fd %d to non-blocking mode fail\n", client_fd);
-//                fflush(stderr);
-//                continue;
-//            }
-//            else
-//            {
-//                fprintf(stdout, "Connected to the client through fd %d\n", client_fd);
-//                fflush(stdout);
-//                fcntl(client_fd, F_SETFL, flags | O_NONBLOCK);
-                int yes = 1;
+
+        struct timeval timeout;
+        timeout.tv_sec = 1;
+        timeout.tv_usec = 0;
+
+        // probe the activity
+        int activity = select(max_fd + 1, &read_fds, NULL, NULL, &timeout);
+        if (activity < 0) {
+            /// FIXME: handle error
+        } else if (activity == 0) {
+            /// timeout, continue probe
+            continue;
+        }
+
+        /// check for new connection on server socket
+        if (FD_ISSET(server_fd_, &read_fds)) {
+            int client_fd = accept(server_fd_, (struct sockaddr *) &client_addr, (socklen_t *) &client_addr_len);
+            if (client_fd >= 0) {
                 std::lock_guard lock(clients_mutex_);
                 clients_.push_back(std::make_shared<Client>(client_fd));
-//            }
+                LOG_INFO(TAG, "New client connected on fd %d", client_fd);
+            }
         }
 
-        ReceiveAndReply();
+        ProcessClientData(read_fds);
     }
-
-//    t.join();
 
     return 0;
 }
@@ -218,8 +233,7 @@ void Server::SetConfig(const std::shared_ptr<RedisConfig> &cfg) {
         /// TODO: add more config properties belong to network???
         port_ = cfg->port;
 
-        if (cfg->is_replica)
-        {
+        if (cfg->is_replica) {
             replication_info_.role = ReplicationInfo::ReplicationRole::Slave;
 
             replication_info_.is_replica = cfg->is_replica;
@@ -239,8 +253,7 @@ std::string Server::ShowReplicationInfo() const {
     ss << "master_replid:" << replication_info_.master_replid << CRLF;
     ss << "master_repl_offset:" << replication_info_.master_repl_offset << CRLF;
 
-    if (replication_info_.is_replica)
-    {
+    if (replication_info_.is_replica) {
         ss << "master_host:" << replication_info_.master_host << CRLF;
         ss << "master_port:" << replication_info_.master_port << CRLF;
     }
@@ -260,16 +273,15 @@ int Server::SetupReplica() {
         return 0;
 
     replica_fd_ = socket(AF_INET, SOCK_STREAM, 0);
-    if (replica_fd_ < 0)
-    {
-        std::cerr << "Fail to create replica fd" << std::endl;
+    if (replica_fd_ < 0) {
+        LOG_ERROR(TAG, "Fail to create replica fd")
         return CreateSocketError;
     }
 
     // Step 2: Resolve hostname to IP address
     struct hostent *master_server = gethostbyname(replication_info_.master_host.c_str());
     if (master_server == NULL) {
-        fprintf(stderr, "No such host: %s\n", replication_info_.master_host.c_str());
+        LOG_ERROR(TAG, "No such host: %s\n", replication_info_.master_host.c_str());
         return GetHostNameError;
     }
 
@@ -282,115 +294,69 @@ int Server::SetupReplica() {
     memcpy(&master_addr.sin_addr.s_addr, master_server->h_addr, master_server->h_length);
 
     // Step 4: Connect to the server
-    if (connect(replica_fd_, (struct sockaddr*)&master_addr, sizeof(master_addr)) < 0) {
+    if (connect(replica_fd_, (struct sockaddr *) &master_addr, sizeof(master_addr)) < 0) {
         perror("connect failed");
         return SocketConnectError;
     }
 
     int ret = HandShake(replica_fd_);
-    if (ret < 0)
-    {
-        fprintf(stderr, "Handshake fail %d\n", ret);
+    if (ret < 0) {
+        LOG_ERROR(TAG, "Handshake fail %d", ret);
         return ret;
     }
 
     return ret;
 }
 
-int Server::ReceiveAndReply() {
-//    std::cout << "Client connected in fd " << fd << std::endl;
+int Server::ProcessClientData(const fd_set &read_fds) {
 
-//    while (listening_.load())
-//    {
-        int max_fd = 0;
-        fd_set readfds;
+    char buffer[4096] = {0};
 
-        struct timeval timeout;
-        timeout.tv_sec = 2;
-        timeout.tv_usec = 0;
+    std::lock_guard lock(clients_mutex_);
+    /// probe the data from the client sockets
+    for (auto &client: clients_) {
+        if (client->active == 0)
+            continue;
 
-        {
-            std::lock_guard<std::mutex> lock(clients_mutex_);
-            FD_ZERO(&readfds);
-            for (const auto& client: clients_) {
-                if (client->active)
-                {
-                    FD_SET(client->fd, &readfds);
-                    max_fd = std::max(max_fd, client->fd);
+        int fd = client->fd;
+        if (FD_ISSET(fd, &read_fds)) {
+            ssize_t recv_bytes = recv(fd, buffer, 4095, 0);
+            if (recv_bytes < 0) {
+                if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    /// no data available yet, retry later
+                    continue;
+                } else {
+                    /// a real error occurred
+                    LOG_ERROR(TAG, "Received from fd %d, error %d, msg %s", fd, errno, strerror(errno));
+                    continue;
                 }
-            }
-        }
-
-        char buffer[4096] = {0};
-
-        int activity = select(max_fd + 1, &readfds, NULL, NULL, &timeout);
-        if (activity <= 0)
-        {
-            return -1;
-        }
-        else
-        {
-//            std::cerr << "there are " << activity << std::endl;
-        }
-
-        std::lock_guard lock(clients_mutex_);
-        for (auto &client : clients_)
-        {
-            if (client->active == 0)
+            } else if (recv_bytes == 0) {
+                /// connection was closed by peer
+                client->active = 0;
+                LOG_ERROR(TAG, "closed connection on fd %d", fd);
                 continue;
+            }
 
-            int fd = client->fd;
-            if (FD_ISSET(fd, &readfds))
-            {
-                ssize_t recv_bytes = recv(fd, (void *) buffer, 4095, 0);
-                if (recv_bytes < 0) {
-                    if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                        // No data available yet, try again later or use select/poll/epoll
-                        // to wait for data
-                        continue;
-                    } else {
-                        // A real error occurred
-                        fprintf(stderr, "Receive from client fd %d failed: %d, msg %s\n", fd, errno, strerror(errno));
-                        continue;
-                    }
-                } else if (recv_bytes == 0) {
-                    // Connection closed by peer
-                    std::cerr << "EOF of file in fd " <<  fd << std::endl;
-                    client->active = 0;
-    //                continue;
-                    return SocketConnectError;
-                }
-
-                buffer[recv_bytes] = '\0';
-                std::string received_data(buffer);
-//                std::cout << "received data " << received_data << " in " << fd << std::endl;
-
-                /// handle the new data
-                int ret = client->executor.ReceiveData(received_data);
-                if (ret == 0)
-                {
-//                    std::cout << "execute data " << received_data << " and send through fd " << fd << std::endl;
-                    /// execute the query and respond
-                    client->executor.Execute(fd);
-                }
-                else
-                {
-                    std::cerr << "Received data " << received_data << " failed" << std::endl;
-                }
-
-                return 0;
+            buffer[recv_bytes] = '\0';
+            std::string received_data(buffer);
+            /// handle the new data
+            int ret = client->executor.ReceiveData(received_data);
+            if (ret == 0) {
+                LOG_DEBUG(TAG, "execute data %s and send through fd %d", buffer, fd);
+                /// execute the query and respond
+                client->executor.Execute(client);
+            } else {
+                LOG_DEBUG(TAG, "Parse received data %s failed", buffer)
             }
         }
-//    }
+    }
 
     return 0;
 }
 
-ssize_t Server::SendData(const int fd, const std::string &response) {
-//    std::cout << "Send through fd " << fd << " response: " << response << std::endl;
+ssize_t Server::SendData(const int fd, const char *data, ssize_t len) {
     size_t total_sent = 0, sent = 0;
-    const char* data = response.data();
-    size_t total_len = response.size();
+    size_t total_len = len;
 
     fd_set writefds;
     FD_ZERO(&writefds);
@@ -404,25 +370,21 @@ ssize_t Server::SendData(const int fd, const std::string &response) {
     if (activity <= 0)
         return SentDataError;
 
+//
+//    int nodelay = 1;
+//    if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (char *)&nodelay, sizeof(nodelay)) < 0)
+//    {
+//        std::cerr << "set fd " << fd << " opt NODELAY fail" << std::endl;
+//    }
+//    else
+//    {
+////        std::cerr << "set fd " << fd << " opt NODELAY success" << std::endl;
+//    }
 
-    int nodelay = 1;
-    if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (char *)&nodelay, sizeof(nodelay)) < 0)
-    {
-        std::cerr << "set fd " << fd << " opt NODELAY fail" << std::endl;
-    }
-    else
-    {
-//        std::cerr << "set fd " << fd << " opt NODELAY success" << std::endl;
-    }
-
-    if (FD_ISSET(fd, &writefds))
-    {
-        while (total_sent < total_len)
-        {
+    if (FD_ISSET(fd, &writefds)) {
+        while (total_sent < total_len) {
             sent = send(fd, data + total_sent, total_len - total_sent, 0);
-//            sent = write(fd, data, total_sent);
-            if (sent == -1)
-            {
+            if (sent == -1) {
                 if (errno == EWOULDBLOCK || errno == EAGAIN) {
                     // Socket buffer is full, wait and retry later (e.g., using select/poll)
                     // In a real application, you'd use select/poll to wait for writability
@@ -430,11 +392,9 @@ ssize_t Server::SendData(const int fd, const std::string &response) {
 //                    usleep(1000); // Sleep for 1ms, for example
                     continue; // Try sending again
                 }
-                std::cerr << "Sent " << total_sent << " bytes, error " << strerror(errno) << std::endl;
+                LOG_ERROR(TAG, "Sent %ld bytes, error %s", total_sent, strerror(errno));
                 return Error::SentDataError;
-            }
-            else if (sent == 0)
-            {
+            } else if (sent == 0) {
                 return Error::SentDataError;
             }
             total_sent += sent;
@@ -442,10 +402,121 @@ ssize_t Server::SendData(const int fd, const std::string &response) {
 
 //        std::cout << "Send through fd " << fd << " successfully " << total_sent << " bytes" << std::endl;
 
-        usleep(10000);
+//        usleep(10000);
 
         return total_sent;
     }
 
     return 0;
+}
+
+int Server::OpenChildInfoPipe() {
+    int ret = pipe(child_info_pipe_);
+    if (ret == -1) {
+        /// close to make sure not leak
+        LOG_ERROR(TAG, "create pip fail %d msg: %s", errno, strerror(errno));
+        CloseChildInfoPipe();
+        return -1;
+    }
+
+    return 0;
+}
+
+void Server::CloseChildInfoPipe() {
+    if (child_info_pipe_[0] != -1 || child_info_pipe_[1] != -1) {
+        close(child_info_pipe_[0]);
+        close(child_info_pipe_[0]);
+        child_info_pipe_[0] = -1;
+        child_info_pipe_[1] = -1;
+    }
+}
+
+void Server::CheckChildrenDone() {
+    int status;
+    pid_t pid;
+    if ((pid = waitpid(-1, &status, WNOHANG)) != 0) {
+        if (pid == -1) {
+            /// return there is not any waiting child proc
+            if (errno == ECHILD)
+                return;
+
+            LOG_ERROR(TAG, "waitpid() returned an error: %s, child proc %d", strerror(errno), child_pid_);
+
+            /// handle error
+        } else {
+            /// handle by exit code, the child proc type
+            int exitcode = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+
+            if (pid == child_pid_) {
+                LOG_DEBUG(TAG, "Handle the child proc %d exit with status %d, exitcode %d", pid, status, exitcode)
+                /// TODO: handle the result of child proc in parent proc
+                OnSaveRdbBackgroundDone(exitcode);
+            } else {
+                LOG_ERROR(TAG, "Conflict between child proc %d and finished pid %d", child_pid_, pid)
+                /// TODO: handle conflict
+            }
+        }
+    }
+}
+
+void Server::OnSaveRdbBackgroundDone(const int exitcode) {
+    /// TODO: update state???
+
+    /// possibly there are some slaves waiting for. Transfer dump file .rdb
+    if (exitcode == 0) {
+        std::lock_guard<std::mutex> lock(clients_mutex_);
+        for (auto &client: clients_) {
+            if (client->is_slave && client->slave_state == SlaveState::WaitBGSaveEnd) {
+                FullSyncRdbToReplica(client);
+            }
+        }
+    }
+}
+
+void Server::FullSyncRdbToReplica(const std::shared_ptr<Client> &slave) {
+    std::string rdb_file_path = Database::GetInstance()->GetRdbPath();
+    char prefix_rdb[20] = {0};
+    ssize_t rdb_size = 0;
+
+    LOG_DEBUG(TAG, "start send replica prefix through fd %d", slave->fd);
+    struct stat st;
+    if (RdbStat(rdb_file_path, st) < 0) {
+        std::cerr << "Stat() file " << rdb_file_path << "error " << strerror(errno) << std::endl;
+        return;
+    }
+    else {
+        rdb_size = st.st_size;
+    }
+
+    snprintf(prefix_rdb, 19, "$%lld\r\n", rdb_size);
+    int slave_fd = slave->fd;
+
+    /** send data */
+    ///  First, send the length of rdb
+    SendData(slave_fd, prefix_rdb, strlen(prefix_rdb));
+
+    ///  Second, read and send binary rdb
+    FILE *rdb_file = fopen(rdb_file_path.c_str(), "rb");
+    if (rdb_file) {
+        ssize_t offset = 0;
+        char buf[16 * 1024] = {0};
+        while (offset < rdb_size) {
+            size_t read_bytes = fread(buf, sizeof(char), 16 * 1024, rdb_file);
+            if (read_bytes > 0) {
+                ssize_t sent_bytes = SendData(slave_fd, buf, read_bytes);
+                if (sent_bytes < 0) {
+                    /// sent fail
+                }
+                offset += read_bytes;
+            } else {
+                if (ferror(rdb_file)) {
+                    LOG_DEBUG(TAG, "Sent %ld bytes, there are total %ld bytes", offset, rdb_size);
+                }
+                break;
+            }
+        }
+        fclose(rdb_file);
+    } else {
+        std::cerr << "Open file " << rdb_file_path << " error: " << strerror(errno) << std::endl;
+    }
 }

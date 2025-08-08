@@ -71,6 +71,8 @@ class RdbParse {
     virtual ~RdbParse();
     RdbParse(const RdbParse&) = delete; 
     RdbParse& operator=(const RdbParse&) = delete;
+
+    virtual int GetVersion() = 0;
 };
 
 }

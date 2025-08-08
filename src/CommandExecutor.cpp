@@ -4,14 +4,16 @@
 
 #include "CommandExecutor.h"
 #include "RedisError.h"
+#include "Server.h"
 
 int CommandExecutor::ReceiveData(const std::string &buffer) {
-    /// append new data to the last. Useful in case the last data
+    /// append new data to the last. Useful in case that remain data in the previous request
     data_ = data_ + buffer;
     resp::result res = decoder_.decode(data_.c_str(), data_.size());
     if (res == resp::incompleted)
     {
         fprintf(stdout, "Received buffer %s. Incompleted RESP with data %s\n", buffer.c_str(), data_.c_str());
+        LOG_DEBUG(TAG, )
         return IncompletedCommand;
     }
 
@@ -20,6 +22,10 @@ int CommandExecutor::ReceiveData(const std::string &buffer) {
         fprintf(stderr, "Received buffer %s. Invalid RESP with data %s\n", buffer.c_str(), data_.c_str());
         return Error::InvalidCommandError;
     }
+
+    /// clear previous data
+    data_.clear();
+    ResetQuery(query_);
 
     resp::unique_value rep = res.value();
 
@@ -31,6 +37,7 @@ int CommandExecutor::ReceiveData(const std::string &buffer) {
     }
 
     std::string cmd = query_.cmd_args.front();
+//    std::cout << "receive cmd " << cmd << std::endl;
     std::transform(cmd.begin(), cmd.end(), cmd.begin(), ::toupper);
     if (std::strcmp(cmd.data(), "ECHO") == 0)
     {
@@ -89,15 +96,15 @@ int CommandExecutor::ReceiveData(const std::string &buffer) {
     return 0;
 }
 
-ssize_t CommandExecutor::Execute(const int fd) {
+ssize_t CommandExecutor::Execute(std::shared_ptr<Client> client) {
     /// create the executor suit for the current command
     internal_executor_ = AbstractInternalCommandExecutor::createCommandExecutor(query_.cmd_type);
     if (!internal_executor_)
         return InvalidCommandError;
 //        return "+OK\r\n";
 
-    internal_executor_->SetSocket(fd);
+    internal_executor_->SetSocket(client->fd);
 
     /// execute command
-    return internal_executor_->execute(query_);
+    return internal_executor_->execute(query_, client);
 }

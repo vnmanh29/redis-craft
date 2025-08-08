@@ -26,7 +26,7 @@ public:
     /// receive and decode. return 0 with completed command, otherwise return the error in RedisError.h
     int ReceiveData(const std::string& buffer);
 
-    ssize_t Execute(const int fd);
+    ssize_t Execute(std::shared_ptr<Client> client);
 
 private:
     /// private method

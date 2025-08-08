@@ -16,7 +16,8 @@ enum Error {
     HandShakeFdError = -6,
     InvalidCommandError = -7,
     InvalidResponseError = -8,
-    SentDataError = -9,
+    InvalidSocketError = -9,
+    SentDataError = -10,
 
 
     /// retriable errors

@@ -137,7 +137,7 @@ struct RdbParseImpl::Arena {
 };
 
 RdbParseImpl::RdbParseImpl(const std::string &path):
-  path_(path), version_(kMagicString.size()), 
+  path_(path), version_(kMagicString.size()),
   result_(new ParsedResult), valid_(true) {
   }
 
@@ -151,7 +151,7 @@ Status RdbParseImpl::Init() {
 
   char buf[16];
   Slice result;
-  if (!Read(9, &result, buf).ok() 
+  if (!Read(9, &result, buf).ok()
       || !result.starts_with(kMagicString)) {
     return Status::Incomplete("unsupport rdb head magic");
   }
@@ -742,7 +742,7 @@ std::string RdbParseImpl::GetTypeName(ValueType type) {
 Status RdbParse::Open(const std::string &path, RdbParse **rdb) {
   *rdb = nullptr;
   RdbParseImpl *impl = new RdbParseImpl(path);
-  Status s = impl->Init(); 
+  Status s = impl->Init();
   if (!s.ok()) {
     delete impl;
     return s; 
@@ -751,6 +751,10 @@ Status RdbParse::Open(const std::string &path, RdbParse **rdb) {
   return Status::OK();
 }
 RdbParse::~RdbParse() {
+}
+
+int RdbParseImpl::GetVersion() {
+    return version_;
 }
 
 

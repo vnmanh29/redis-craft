@@ -7,40 +7,35 @@
 #include "CommandExecutor.h"
 #include "RedisOption.h"
 #include "Server.h"
+#include "RedisDef.h"
 
-static int redis_parse_options(int argc, char** argv, std::shared_ptr<RedisConfig> cfg)
-{
+LogLevel global_log_level = LogLevel::Silent;
+const char TAG[] = "RDB";
+
+static int redis_parse_options(int argc, char **argv, std::shared_ptr<RedisConfig> cfg) {
     int idx = 1;
-    while (idx < argc)
-    {
-        char* arg = argv[idx];
-        if (arg[0] == '-' && arg[1] == '-' && (&arg[2]))
-        {
+    while (idx < argc) {
+        char *arg = argv[idx];
+        if (arg[0] == '-' && arg[1] == '-' && (&arg[2])) {
             /// get the name of option, find this option and set the value
             std::string name = static_cast<std::string>(&arg[2]);
-            if (idx + 1 >= argc)
-            {
-                printf("%s, %d\n", __func__, __LINE__);
+            if (idx + 1 >= argc) {
+                LOG_ERROR(TAG, "parse option failed");
                 return -1;
             }
-            
-            const char* val = argv[++idx];
-            const RedisOptionDef* opt = find_redis_option(redis_options, name.c_str());
-            if (opt)
-            {
+
+            const char *val = argv[++idx];
+            const RedisOptionDef *opt = find_redis_option(redis_options, name.c_str());
+            if (opt) {
                 opt->func_arg(cfg.get(), val);
-            }
-            else
-            {
-                fprintf(stderr, "%s, %d, idx %d, name %s\n", __func__, __LINE__, idx, name.c_str());
+            } else {
+                LOG_ERROR(TAG, "%s, %d, idx %d, name %s\n", __func__, __LINE__, idx, name.c_str());
                 return -1;
             }
-        }
-        else
-        {
-            
+        } else {
+
             /// TODO: handle another format
-            fprintf(stderr, "%s, %d, idx %d\n", __func__, __LINE__, idx);
+            LOG_ERROR(TAG, "%s, %d, idx %d\n", __func__, __LINE__, idx);
             return -2;
         }
 
@@ -50,11 +45,14 @@ static int redis_parse_options(int argc, char** argv, std::shared_ptr<RedisConfi
     return 0;
 }
 
-static void redis_set_global_config(const std::shared_ptr<RedisConfig>& cfg)
-{
+static void redis_set_global_config(const std::shared_ptr<RedisConfig> &cfg) {
     Database::GetInstance()->SetConfig(cfg);
 
     Server::GetInstance()->SetConfig(cfg);
+}
+
+static void set_log_level(LogLevel lvl) {
+    global_log_level = lvl;
 }
 
 int main(int argc, char **argv) {
@@ -62,15 +60,15 @@ int main(int argc, char **argv) {
     std::cout << std::unitbuf;
     std::cerr << std::unitbuf;
 
+    set_log_level(LogLevel::Info);
+
     /// parse the argv
     std::shared_ptr<RedisConfig> cfg = std::make_shared<RedisConfig>();
     int ret = redis_parse_options(argc, argv, cfg);
-    if (ret < 0)
-    {
-        fprintf(stderr, "Invalid parameters, total %d ret %d\n", argc, ret);
-        for (int i = 0;i < argc; ++i)
-        {
-            fprintf(stderr, "arg %d: %s\n", i, argv[i]);
+    if (ret < 0) {
+        LOG_ERROR(TAG, "Invalid parameters, total %d ret %d", argc, ret);
+        for (int i = 0; i < argc; ++i) {
+            LOG_ERROR(TAG, "arg %d: %s\n", i, argv[i]);
         }
         return -1;
     }
