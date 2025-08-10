@@ -8,8 +8,7 @@
 #include <string>
 #include "Utils.h"
 
-typedef struct RedisConfig
-{
+typedef struct RedisConfig {
     std::string dir_path;
     std::string dbfilename;
     int port;
@@ -18,17 +17,18 @@ typedef struct RedisConfig
     std::string master_host;
     int master_port;
 
-    RedisConfig() : port(DEFAULT_REDIS_PORT), is_replica(0), dir_path("./"), dbfilename("dump.rdb") {} // Default port is 6379
+    RedisConfig() : port(DEFAULT_REDIS_PORT), is_replica(0), dir_path("./"),
+                    dbfilename("dump.rdb") {} // Default port is 6379
 } RedisConfig;
 
-typedef struct RedisOptionDef
-{
-    char* name;
+typedef struct RedisOptionDef {
+    char *name;
+
     int (*func_arg)(RedisConfig *, const char *);
 } RedisOptionDef;
 
 extern const RedisOptionDef redis_options[];
 
-const RedisOptionDef* find_redis_option(const RedisOptionDef* options, const char* arg);
+const RedisOptionDef *find_redis_option(const RedisOptionDef *options, const char *arg);
 
 #endif //REDIS_STARTER_CPP_REDISOPTION_H

@@ -5,10 +5,10 @@
 #ifndef REDIS_STARTER_CPP_REDISDEF_H
 #define REDIS_STARTER_CPP_REDISDEF_H
 
-enum struct LogLevel{
+enum struct LogLevel {
     Silent = 0,
     Error = 1,
-    Info  = 2,
+    Info = 2,
     Debug = 3,
 };
 

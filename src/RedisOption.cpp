@@ -8,10 +8,8 @@
 #include <sstream>
 #include <iostream>
 
-static int opt_dir(RedisConfig* redis_cfg, const char* arg)
-{
-    if (redis_cfg)
-    {
+static int opt_dir(RedisConfig *redis_cfg, const char *arg) {
+    if (redis_cfg) {
         redis_cfg->dir_path = arg;
         return 0;
     }
@@ -19,10 +17,8 @@ static int opt_dir(RedisConfig* redis_cfg, const char* arg)
     return -1;
 }
 
-static int opt_dbfilename(RedisConfig* redis_cfg, const char* arg)
-{
-    if (redis_cfg)
-    {
+static int opt_dbfilename(RedisConfig *redis_cfg, const char *arg) {
+    if (redis_cfg) {
         redis_cfg->dbfilename = arg;
         return 0;
     }
@@ -30,17 +26,13 @@ static int opt_dbfilename(RedisConfig* redis_cfg, const char* arg)
     return -1;
 }
 
-static int opt_port(RedisConfig* redis_cfg, const char* arg)
-{
-    if (redis_cfg)
-    {
-        try
-        {
+static int opt_port(RedisConfig *redis_cfg, const char *arg) {
+    if (redis_cfg) {
+        try {
             redis_cfg->port = std::stoi(arg);
             return 0;
         }
-        catch (const std::exception& e)
-        {
+        catch (const std::exception &e) {
             return -1; // Invalid port number
         }
     }
@@ -48,10 +40,8 @@ static int opt_port(RedisConfig* redis_cfg, const char* arg)
     return -1;
 }
 
-static int opt_replicaof(RedisConfig* redis_cfg, const char* arg)
-{
-    if (redis_cfg)
-    {
+static int opt_replicaof(RedisConfig *redis_cfg, const char *arg) {
+    if (redis_cfg) {
         try {
             std::stringstream ss(static_cast<std::string>(arg));
 
@@ -61,8 +51,7 @@ static int opt_replicaof(RedisConfig* redis_cfg, const char* arg)
 
             return 0;
         }
-        catch (std::exception& ex)
-        {
+        catch (std::exception &ex) {
             std::cerr << "Invalid arguments of option replicaof" << std::endl;
             return -1; /// invalid argument
         }
@@ -73,19 +62,18 @@ static int opt_replicaof(RedisConfig* redis_cfg, const char* arg)
 
 const RedisOptionDef redis_options[] =
         {
-                {"dir", opt_dir},
+                {"dir",        opt_dir},
                 {"dbfilename", opt_dbfilename},
-                {"port", opt_port},
-                {"replicaof", opt_replicaof},
+                {"port",       opt_port},
+                {"replicaof",  opt_replicaof},
                 {nullptr}
         };
 
-const RedisOptionDef *find_redis_option(const RedisOptionDef* options, const char *arg) {
+const RedisOptionDef *find_redis_option(const RedisOptionDef *options, const char *arg) {
     if (!options || !arg)
         return nullptr;
 
-    while (options->name)
-    {
+    while (options->name) {
         if (strcmp(options->name, arg) == 0)
             break;
         ++options;

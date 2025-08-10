@@ -13,7 +13,7 @@
 class GlobMatcher {
 private:
     // Convert glob pattern to regex pattern
-    static std::string globToRegex(const std::string& glob) {
+    static std::string globToRegex(const std::string &glob) {
         std::string regex = "^"; // Start anchor
 
         for (size_t i = 0; i < glob.length(); i++) {
@@ -95,25 +95,25 @@ private:
     }
 
 public:
-    static bool matchGlob(const std::string& text, const std::string& pattern) {
+    static bool matchGlob(const std::string &text, const std::string &pattern) {
         try {
             std::string regexPattern = globToRegex(pattern);
             std::regex globRegex(regexPattern);
             return std::regex_match(text, globRegex);
-        } catch (const std::regex_error& e) {
+        } catch (const std::regex_error &e) {
             // If regex compilation fails, return false
             return false;
         }
     }
 
     // Additional utility method to see the converted regex (for debugging)
-    static std::string getRegexPattern(const std::string& pattern) {
+    static std::string getRegexPattern(const std::string &pattern) {
         return globToRegex(pattern);
     }
 };
 
 // Convenience function
-bool matchGlob(const std::string& text, const std::string& pattern) {
+bool matchGlob(const std::string &text, const std::string &pattern) {
     return GlobMatcher::matchGlob(text, pattern);
 }
 

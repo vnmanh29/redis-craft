@@ -483,8 +483,7 @@ void Server::FullSyncRdbToReplica(const std::shared_ptr<Client> &slave) {
     if (RdbStat(rdb_file_path, st) < 0) {
         std::cerr << "Stat() file " << rdb_file_path << "error " << strerror(errno) << std::endl;
         return;
-    }
-    else {
+    } else {
         rdb_size = st.st_size;
     }
 

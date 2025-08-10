@@ -16,8 +16,7 @@
 
 typedef struct Client Client;
 
-class AbstractInternalCommandExecutor : public std::enable_shared_from_this<AbstractInternalCommandExecutor>
-{
+class AbstractInternalCommandExecutor : public std::enable_shared_from_this<AbstractInternalCommandExecutor> {
 private:
     int fd_;
 
@@ -30,8 +29,7 @@ public:
 
     static std::shared_ptr<AbstractInternalCommandExecutor> createCommandExecutor(CommandType cmd_type);
 
-    inline void SetSocket(const int fd)
-    {
+    inline void SetSocket(const int fd) {
         fd_ = fd;
     }
 

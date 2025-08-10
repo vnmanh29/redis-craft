@@ -16,7 +16,8 @@
 class Database {
 private:
 
-    static Database* instance_;
+    static Database *instance_;
+
     Database() = default;
 
     std::unordered_map<std::string, std::shared_ptr<RdbParser::ParsedResult>> table_;
@@ -26,23 +27,24 @@ private:
     std::shared_ptr<RedisConfig> rdb_cfg_;
 
 private:
-    bool IsEqualConfig(const std::shared_ptr<RedisConfig>& cfg) const;
+    bool IsEqualConfig(const std::shared_ptr<RedisConfig> &cfg) const;
 
 public:
-    Database& operator=(const Database& rhs) = delete;
-    Database(const Database& rhs) = delete;
+    Database &operator=(const Database &rhs) = delete;
 
-    static Database* GetInstance();
+    Database(const Database &rhs) = delete;
 
-    int SetConfig(const std::shared_ptr<RedisConfig>& cfg);
+    static Database *GetInstance();
 
-    std::string GetConfigFromName(const std::string& property);
+    int SetConfig(const std::shared_ptr<RedisConfig> &cfg);
+
+    std::string GetConfigFromName(const std::string &property);
 
     void SetKeyVal(const std::string &key, const std::string &val, int on_exist, int64_t expired_ts);
 
-    std::string RetrieveValueOfKey(const std::string& key);
+    std::string RetrieveValueOfKey(const std::string &key);
 
-    std::vector<std::string> RetrieveKeysMatchPattern(const std::string& pattern);
+    std::vector<std::string> RetrieveKeysMatchPattern(const std::string &pattern);
 
     ssize_t SaveRdbBackground(const std::string &file_name);
 

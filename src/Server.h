@@ -89,7 +89,7 @@ private:
 
     void OnSaveRdbBackgroundDone(const int exitcode);
 
-    void FullSyncRdbToReplica(const std::shared_ptr<Client>& slave);
+    void FullSyncRdbToReplica(const std::shared_ptr<Client> &slave);
 
 public:
     Server &operator=(const Server &sv) = delete;

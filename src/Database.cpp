@@ -46,7 +46,7 @@ std::string Database::RetrieveValueOfKey(const std::string &key) {
         auto p = table_.at(key);
         if (p->expire_time > 0 && p->expire_time < now) {
             LOG_INFO(TAG, "Key %s has expired at %lld, now %lld, removing it from the database.\n",
-                   key.c_str(), p->expire_time, now);
+                     key.c_str(), p->expire_time, now);
             return "";
         }
         return p->kv_value;
@@ -188,8 +188,7 @@ ssize_t Database::SaveRdbBackground(const std::string &file_name) {
 }
 
 std::string Database::GetRdbPath() const {
-    if (rdb_cfg_)
-    {
+    if (rdb_cfg_) {
         std::string deliminator = (!rdb_cfg_->dir_path.empty() && rdb_cfg_->dir_path.back() == '/') ? "" : "/";
         return rdb_cfg_->dir_path + deliminator + rdb_cfg_->dbfilename;
     }

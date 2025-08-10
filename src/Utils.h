@@ -13,8 +13,7 @@
 
 #define DEFAULT_MASTER_REPLID "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
 
-enum CommandType
-{
+enum CommandType {
     EchoCmd = 0,
     GetCmd,
     SetCmd,
@@ -28,24 +27,23 @@ enum CommandType
     UnknownCmd
 };
 
-typedef struct Query
-{
+typedef struct Query {
     CommandType cmd_type;
     std::vector<std::string> cmd_args;
 } Query;
 
 /// input: array of strings. Output: a string presents RESP Array
-std::string EncodeArr2RespArr(std::vector<std::string>& arr);
+std::string EncodeArr2RespArr(std::vector<std::string> &arr);
 
 std::string EncodeRespSimpleStr(std::string s);
 
-void ResetQuery(Query& query);
+void ResetQuery(Query &query);
 
-int RdbStat(const std::string& file_name, struct stat& st);
+int RdbStat(const std::string &file_name, struct stat &st);
 
-std::string RdbHex2Bin(const std::string& hex);
+std::string RdbHex2Bin(const std::string &hex);
 
-std::string HexToBinary(const std::string& hexStr);
+std::string HexToBinary(const std::string &hexStr);
 
 void hexToBinaryData(const std::string &hexStr, std::vector<unsigned char> &binaryData);
 

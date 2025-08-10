@@ -6,10 +6,8 @@
 #include "Server.h"
 #include "RedisError.h"
 
-class EchoCommandExecutor : public AbstractInternalCommandExecutor
-{
-    ssize_t execute(const Query &query, std::shared_ptr<Client> client) override
-    {
+class EchoCommandExecutor : public AbstractInternalCommandExecutor {
+    ssize_t execute(const Query &query, std::shared_ptr<Client> client) override {
         if (query.cmd_args.size() < 2)
             return {};
 
@@ -23,28 +21,22 @@ class EchoCommandExecutor : public AbstractInternalCommandExecutor
     }
 };
 
-class GetCommandExecutor : public AbstractInternalCommandExecutor
-{
+class GetCommandExecutor : public AbstractInternalCommandExecutor {
 private:
-    static std::string GetResponse(const Query& query)
-    {
+    static std::string GetResponse(const Query &query) {
         std::string response;
 
-        if (query.cmd_args.size() < 2)
-        {
+        if (query.cmd_args.size() < 2) {
             LOG_ERROR(TAG, "GetCommandExecutor: Invalid number of arguments")
             return "";
         }
 
         std::string resp = Database::GetInstance()->RetrieveValueOfKey(query.cmd_args[1]);
 
-        if (resp.empty())
-        {
+        if (resp.empty()) {
             LOG_ERROR(TAG, "GetCommandExecutor: Key not found");
             return "$-1\r\n"; // RESP format for nil
-        }
-        else
-        {
+        } else {
             resp::encoder<std::string> encoder;
             auto s = encoder.encode_bulk_str(resp, resp.size());
             LOG_DEBUG(TAG, "Get key %s, val %s\n", query.cmd_args[1].c_str(), s.c_str());
@@ -52,8 +44,7 @@ private:
         }
     }
 
-    ssize_t execute(const Query &query, std::shared_ptr<Client> client) override
-    {
+    ssize_t execute(const Query &query, std::shared_ptr<Client> client) override {
         std::string response = GetResponse(query);
         int fd = GetSocket();
         if (response.empty() || fd < 0)
@@ -63,47 +54,39 @@ private:
     }
 };
 
-class SetCommandExecutor : public AbstractInternalCommandExecutor
-{
+class SetCommandExecutor : public AbstractInternalCommandExecutor {
 private:
-    typedef struct Options
-    {
+    typedef struct Options {
         int set_on_exist;
         int64_t expired_ts;
+
         Options() : set_on_exist(-1), expired_ts(0) {}
     } Options;
 
-    int ParseArgs(std::vector<std::string>& args, Options& opts)
-    {
-        for (size_t i = 2;i < args.size(); ++i)
-        {
+    int ParseArgs(std::vector<std::string> &args, Options &opts) {
+        for (size_t i = 2; i < args.size(); ++i) {
             std::string arg = args[i];
             std::transform(arg.begin(), arg.end(), arg.begin(), ::toupper);
-            if (arg == "NX")
-            {
+            if (arg == "NX") {
                 if (opts.set_on_exist == 1)
                     return -1;
                 opts.set_on_exist = 0;
-            }
-            else if (arg == "XX")
-            {
+            } else if (arg == "XX") {
                 if (opts.set_on_exist == 0)
                     return -1;
                 opts.set_on_exist = 1;
-            }
-            else if (arg == "EX")
-            {
+            } else if (arg == "EX") {
                 if (opts.expired_ts != 0 || i + 1 >= args.size())
                     return -1;
 
-                opts.expired_ts = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count() + stoll(args[i+1]) * 1000;
+                opts.expired_ts = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::system_clock::now().time_since_epoch()).count() + stoll(args[i + 1]) * 1000;
                 ++i;
-            }
-            else if (arg == "PX")
-            {
+            } else if (arg == "PX") {
                 if (opts.expired_ts != 0 || i + 1 >= args.size())
                     return -1;
-                opts.expired_ts = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count() + stoll(args[i+1]);
+                opts.expired_ts = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::system_clock::now().time_since_epoch()).count() + stoll(args[i + 1]);
                 ++i;
             }
         }
@@ -111,8 +94,7 @@ private:
         return 0;
     }
 
-    std::string GetResponse(const Query& query)
-    {
+    std::string GetResponse(const Query &query) {
 
         if (query.cmd_args.size() < 3)
             return {};
@@ -133,8 +115,7 @@ private:
     }
 
 public:
-    ssize_t execute(const Query &query, std::shared_ptr<Client> client) override
-    {
+    ssize_t execute(const Query &query, std::shared_ptr<Client> client) override {
         std::string response = GetResponse(query);
         if (response.empty())
             return InvalidResponseError;
@@ -145,10 +126,8 @@ public:
 
 };
 
-class PingCommandExecutor : public AbstractInternalCommandExecutor
-{
-    ssize_t execute(const Query &query, std::shared_ptr<Client> client) override
-    {
+class PingCommandExecutor : public AbstractInternalCommandExecutor {
+    ssize_t execute(const Query &query, std::shared_ptr<Client> client) override {
         if (query.cmd_args.size() < 1)
             return InvalidCommandError;
 
@@ -159,25 +138,19 @@ class PingCommandExecutor : public AbstractInternalCommandExecutor
     }
 };
 
-class GetConfigCommandExecutor : public AbstractInternalCommandExecutor
-{
-    std::string GetResponse(const Query& query)
-    {
+class GetConfigCommandExecutor : public AbstractInternalCommandExecutor {
+    std::string GetResponse(const Query &query) {
         if (query.cmd_args.size() < 2)
             return "!12\r\nInvalid args\r\n";
 
         std::vector<std::string> configs;
-        for (int i = 2;i < query.cmd_args.size(); ++i)
-        {
+        for (int i = 2; i < query.cmd_args.size(); ++i) {
             std::string property = query.cmd_args[i];
             std::string cfg = Database::GetInstance()->GetConfigFromName(property);
-            if (cfg.empty())
-            {
+            if (cfg.empty()) {
                 /// return invalid
                 return "!12\r\nInvalid args\r\n";
-            }
-            else
-            {
+            } else {
                 configs.push_back(property);
                 configs.push_back(cfg);
             }
@@ -186,8 +159,7 @@ class GetConfigCommandExecutor : public AbstractInternalCommandExecutor
         resp::encoder<std::string> enc;
         std::vector<std::string> replies = enc.encode_arr(configs);
         std::string response;
-        for (auto& rely : replies)
-        {
+        for (auto &rely: replies) {
             response += rely;
         }
 
@@ -195,11 +167,9 @@ class GetConfigCommandExecutor : public AbstractInternalCommandExecutor
     }
 
 public:
-    ssize_t execute(const Query &query, std::shared_ptr<Client> client) override
-    {
+    ssize_t execute(const Query &query, std::shared_ptr<Client> client) override {
         std::string response = GetResponse(query);
-        if (response.empty())
-        {
+        if (response.empty()) {
             return InvalidResponseError;
         }
 
@@ -208,11 +178,9 @@ public:
     }
 };
 
-class KeysCommandExecutor : public AbstractInternalCommandExecutor
-{
+class KeysCommandExecutor : public AbstractInternalCommandExecutor {
 private:
-    std::string GetResponse(const Query& query)
-    {
+    std::string GetResponse(const Query &query) {
         if (query.cmd_args.size() < 2)
             return "!12\r\nInvalid args\r\n";
 
@@ -223,7 +191,7 @@ private:
         resp::encoder<std::string> enc;
         std::vector<std::string> resp_keys = enc.encode_arr(matched_keys);
         std::string response;
-        for (auto& resp_key : resp_keys) {
+        for (auto &resp_key: resp_keys) {
             response += resp_key;
         }
 
@@ -231,11 +199,9 @@ private:
     }
 
 public:
-    ssize_t execute(const Query &query, std::shared_ptr<Client> client) override
-    {
+    ssize_t execute(const Query &query, std::shared_ptr<Client> client) override {
         std::string response = GetResponse(query);
-        if (response.empty())
-        {
+        if (response.empty()) {
             return InvalidResponseError;
         }
 
@@ -245,23 +211,17 @@ public:
 
 };
 
-class InfoCommandExecutor : public AbstractInternalCommandExecutor
-{
+class InfoCommandExecutor : public AbstractInternalCommandExecutor {
 private:
-    std::string GetResponse(const Query& query)
-    {
+    std::string GetResponse(const Query &query) {
         std::string section = "default";
-        if (query.cmd_args.size() > 2)
-        {
+        if (query.cmd_args.size() > 2) {
             return "!12\r\nInvalid args\r\n";
-        }
-        else if (query.cmd_args.size() == 2)
-        {
+        } else if (query.cmd_args.size() == 2) {
             section = query.cmd_args[1];
         }
 
-        if (section == "replication")
-        {
+        if (section == "replication") {
             /// show the info of server
             std::string replication_info = Server::GetInstance()->ShowReplicationInfo();
             resp::encoder<std::string> enc;
@@ -272,8 +232,7 @@ private:
     }
 
 public:
-    ssize_t execute(const Query &query, std::shared_ptr<Client> client) override
-    {
+    ssize_t execute(const Query &query, std::shared_ptr<Client> client) override {
         std::string response = GetResponse(query);
         int fd = GetSocket();
 
@@ -284,10 +243,8 @@ public:
     }
 };
 
-class ReplconfCommandExecutor : public AbstractInternalCommandExecutor
-{
-    ssize_t execute(const Query &query, std::shared_ptr<Client> client) override
-    {
+class ReplconfCommandExecutor : public AbstractInternalCommandExecutor {
+    ssize_t execute(const Query &query, std::shared_ptr<Client> client) override {
         /// TODO: handle the argument
         std::string response = "+OK\r\n";
         int fd = GetSocket();
@@ -300,13 +257,10 @@ class ReplconfCommandExecutor : public AbstractInternalCommandExecutor
     }
 };
 
-class PSyncCommandExecutor : public AbstractInternalCommandExecutor
-{
-    ssize_t execute(const Query &query, std::shared_ptr<Client> client) override
-    {
+class PSyncCommandExecutor : public AbstractInternalCommandExecutor {
+    ssize_t execute(const Query &query, std::shared_ptr<Client> client) override {
         int fd = GetSocket();
-        if (fd < 0)
-        {
+        if (fd < 0) {
             LOG_ERROR(TAG, "Invalid fd %d", fd)
             return InvalidSocketError;
         }
@@ -333,10 +287,8 @@ class PSyncCommandExecutor : public AbstractInternalCommandExecutor
     }
 };
 
-class UnknownCommandExecutor : public AbstractInternalCommandExecutor
-{
-    ssize_t execute(const Query &query, std::shared_ptr<Client> client) override
-    {
+class UnknownCommandExecutor : public AbstractInternalCommandExecutor {
+    ssize_t execute(const Query &query, std::shared_ptr<Client> client) override {
         std::string response = "+OK\r\n";
         int fd = GetSocket();
 
