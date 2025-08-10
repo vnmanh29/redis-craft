@@ -174,4 +174,26 @@ class GetConfigCommandExecutor : public AbstractInternalCommandExecutor
     }
 };
 
+class KeysCommandExecutor : public AbstractInternalCommandExecutor
+{
+    std::string execute(const Query& query) override
+    {
+        if (query.cmd_args.size() < 2)
+            return "!12\r\nInvalid args\r\n";
+
+        // get the pattern
+        std::string pattern = query.cmd_args[1];
+        auto matched_keys = Database::GetInstance()->RetrieveKeysMatchPattern(pattern);
+
+        resp::encoder<std::string> enc;
+        std::vector<std::string> resp_keys = enc.encode_arr(matched_keys);
+        std::string response;
+        for (auto& resp_key : resp_keys) {
+            response += resp_key;
+        }
+
+        return response;
+    }
+};
+
 #endif //REDIS_STARTER_CPP_INTERNALCOMMANDEXECUTOR_H

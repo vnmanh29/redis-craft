@@ -15,6 +15,7 @@ enum CommandType
     PingCmd,
     GetConfigCmd,
     SetConfigCmd,
+    KeysCmd,
     UnknownCmd
 };
 

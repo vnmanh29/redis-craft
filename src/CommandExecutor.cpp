@@ -50,6 +50,10 @@ void CommandExecutor::ReceiveRequest(const std::string &request) {
             query_.cmd_type = UnknownCmd;
         }
     }
+    else if (std::strcmp(cmd.data(), "KEYS") == 0)
+    {
+        query_.cmd_type = KeysCmd;
+    }
     else
     {
         query_.cmd_type = UnknownCmd;

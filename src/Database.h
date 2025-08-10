@@ -11,6 +11,7 @@
 
 #include "all.hpp"
 #include "RedisOption.h"
+#include "rdbparse.h"
 
 class Database {
 private:
@@ -18,10 +19,13 @@ private:
     static Database* instance_;
     Database() = default;
 
-    std::unordered_map<std::string, std::pair<std::string, int64_t>> table_;
+    std::unordered_map<std::string, std::shared_ptr<RdbParser::ParsedResult>> table_;
     std::mutex m_;
 
     std::shared_ptr<RedisConfig> rdb_cfg_;
+
+private:
+    bool IsEqualConfig(const std::shared_ptr<RedisConfig>& cfg) const;
 
 public:
     Database& operator=(const Database& rhs) = delete;
@@ -36,6 +40,8 @@ public:
     void SetKeyVal(const std::string &key, const std::string &val, int on_exist, int64_t expired_ts);
 
     std::string RetrieveValueOfKey(const std::string& key);
+
+    std::vector<std::string> RetrieveKeysMatchPattern(const std::string& pattern);
 };
 
 

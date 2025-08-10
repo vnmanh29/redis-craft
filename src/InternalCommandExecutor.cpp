@@ -17,6 +17,8 @@ AbstractInternalCommandExecutor::createCommandExecutor(const CommandType cmd_typ
             return std::make_shared<PingCommandExecutor>();
         case GetConfigCmd:
             return std::make_shared<GetConfigCommandExecutor>();
+        case KeysCmd:
+            return std::make_shared<KeysCommandExecutor>();
     }
 
     return nullptr;
