@@ -75,8 +75,12 @@ int CommandExecutor::ReceiveDataAndExecute(const std::string &buffer, std::share
         for (const auto &cli: clients) {
             if (cli->is_slave) {
                 /// FIXME: handle case copy the response to output buffer fail
-//                cli->FillStringToOutBuffer(response);
-                Server::SendData(cli->fd, response.c_str(), response.size());
+//                size_t out_buffer_size = cli->FillStringToOutBuffer(response);
+//                if (out_buffer_size > 0) {
+//                    /// TODO: set this fd to write fd_set in next loop
+//
+//                }
+                ssize_t ret = Server::SendData(cli->fd, response.c_str(), response.size());
             }
         }
     }

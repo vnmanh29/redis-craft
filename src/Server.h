@@ -38,6 +38,7 @@ typedef struct ReplicationInfo {
 
 /// States of the slave in master server
 enum SlaveState {
+    SlaveOnline = 0,
     WaitBGSaveStart = 1,
     WaitBGSaveEnd = 2,
 };

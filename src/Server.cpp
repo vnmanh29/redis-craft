@@ -85,7 +85,6 @@ int Server::HandShake(int fd) {
 
         buffer[recv_bytes] = '\0';
         std::string received_data(buffer);
-//        printf("Received %lu bytes: %s\n", recv_bytes, buffer);
         /// TODO: handle received data
 
     }
@@ -482,6 +481,7 @@ ssize_t Server::FullSyncRdbToReplica(const std::shared_ptr<Client> &slave) {
         std::cerr << "Open file " << rdb_file_path << " error: " << strerror(errno) << std::endl;
     }
 
+    slave->slave_state = SlaveState::SlaveOnline;
     return total_sent;
 }
 
