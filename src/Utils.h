@@ -7,11 +7,15 @@
 
 #include "all.hpp"
 #include <sys/stat.h>
+#include <unordered_map>
 
 #define CRLF "\r\n"
 #define DEFAULT_REDIS_PORT 6379
 
 #define DEFAULT_MASTER_REPLID "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
+
+#define CMD_WRITE (1<<1)
+#define CMD_READ  (1<<2)
 
 enum CommandType {
     EchoCmd = 0,
@@ -22,14 +26,23 @@ enum CommandType {
     ConfigSetCmd,
     KeysCmd,
     InfoCmd,
-    ReplcofCmd,
+    ReplconfCmd,
     PSyncCmd,
     UnknownCmd
 };
 
-typedef struct Query {
+typedef struct RedisCmd {
     CommandType cmd_type;
-    std::vector<std::string> cmd_args;
+    uint64_t flags;
+    std::unordered_map<std::string, RedisCmd *> subcmd_dict;
+
+    explicit RedisCmd(CommandType type, uint64_t flag) : cmd_type(type), flags(flag) {}
+} RedisCmd;
+
+typedef struct Query {
+    RedisCmd *cmd;    /// point to the global cmd
+    uint64_t flags;   /// flag of cmd, like CMD_READ, CMD_WRITE, etc ...
+    std::vector<std::string> cmd_args;      /// the list argv for execution
 } Query;
 
 /// input: array of strings. Output: a string presents RESP Array

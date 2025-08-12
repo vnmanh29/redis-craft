@@ -6,77 +6,141 @@
 #include "RedisError.h"
 #include "Server.h"
 
-int CommandExecutor::ReceiveData(const std::string &buffer) {
+int CommandExecutor::ReceiveDataAndExecute(const std::string &buffer, std::shared_ptr<Client> client) {
     /// append new data to the last. Useful in case that remain data in the previous request
     data_ = data_ + buffer;
-    resp::result res = decoder_.decode(data_.c_str(), data_.size());
-    if (res == resp::incompleted) {
-        LOG_DEBUG(TAG, "Received buffer %s. Incompleted RESP with data %s\n", buffer.c_str(), data_.c_str())
-        return IncompletedCommand;
-    }
+    LOG_DEBUG(TAG, "Received buffer %s, new data %s", buffer.c_str(), data_.c_str());
 
-    if (res == resp::error) {
-        fprintf(stderr, "Received buffer %s. Invalid RESP with data %s\n", buffer.c_str(), data_.c_str());
-        return Error::InvalidCommandError;
-    }
-
-    /// clear previous data
-    data_.clear();
-    ResetQuery(query_);
-
-    resp::unique_value rep = res.value();
-
-    /// create query
-    resp::unique_array<resp::unique_value> arr = rep.array();
-    for (int i = 0; i < arr.size(); ++i) {
-        query_.cmd_args.emplace_back(arr[i].bulkstr().data(), arr[i].bulkstr().size());
-    }
-
-    std::string cmd = query_.cmd_args.front();
-//    std::cout << "receive cmd " << cmd << std::endl;
-    std::transform(cmd.begin(), cmd.end(), cmd.begin(), ::toupper);
-    if (std::strcmp(cmd.data(), "ECHO") == 0) {
-        query_.cmd_type = EchoCmd;
-    } else if (std::strcmp(cmd.data(), "GET") == 0) {
-        query_.cmd_type = GetCmd;
-    } else if (std::strcmp(cmd.data(), "SET") == 0) {
-        query_.cmd_type = SetCmd;
-    } else if (std::strcmp(cmd.data(), "PING") == 0) {
-        query_.cmd_type = PingCmd;
-    } else if (std::strcmp(cmd.data(), "CONFIG") == 0) {
-        std::string sub_cmd = query_.cmd_args.size() > 1 ? query_.cmd_args[1] : "";
-        std::transform(sub_cmd.begin(), sub_cmd.end(), sub_cmd.begin(), ::toupper);
-        if (std::strcmp(sub_cmd.data(), "GET") == 0) {
-            query_.cmd_type = ConfigGetCmd;
-        } else if (std::strcmp(sub_cmd.data(), "SET") == 0) {
-            query_.cmd_type = ConfigSetCmd;
-        } else {
-            query_.cmd_type = UnknownCmd;
+    size_t offset = 0;
+    while (offset < data_.size()) {
+        /// FIXME: avoid to call strdup() this char array
+        const char *remain_buf = strdup(data_.substr(offset).c_str());
+        size_t remain_len = data_.size() - offset;
+        resp::result res = decoder_.decode(remain_buf, remain_len);
+        if (res == resp::incompleted) {
+            LOG_DEBUG(TAG, "Incompleted RESP with remainder buf %s", remain_buf);
+            data_ = data_.substr(offset);
+            return IncompletedCommand;
+        } else if (res == resp::error) {
+            LOG_ERROR(TAG, "Invalid RESP with remainder buf %s", remain_buf);
+            return Error::InvalidCommandError;
         }
-    } else if (std::strcmp(cmd.data(), "KEYS") == 0) {
-        query_.cmd_type = KeysCmd;
-    } else if (std::strcmp(cmd.data(), "INFO") == 0) {
-        query_.cmd_type = InfoCmd;
-    } else if (std::strcmp(cmd.data(), "REPLCONF") == 0) {
-        query_.cmd_type = ReplcofCmd;
-    } else if (std::strcmp(cmd.data(), "PSYNC") == 0) {
-        query_.cmd_type = PSyncCmd;
-    } else {
-        query_.cmd_type = UnknownCmd;
+
+        delete remain_buf;
+
+        /// build the command
+        ResetQuery(query_);
+
+        resp::unique_value rep = res.value();
+        /// create query and executor of this command
+        int ret = BuildRedisCommand(rep);
+        if (ret < 0) {
+            LOG_ERROR(TAG, "NOT found the suitable cmd, err %d", ret);
+#if RELEASE
+            return ret;
+#else // RELEASE
+            query_.cmd = new RedisCmd(UnknownCmd, CMD_READ);
+#endif // RELEASE
+        }
+
+        ret = BuildExecutor();
+        if (ret < 0) {
+            LOG_ERROR(TAG, "Build executor fail, error %d", ret);
+            return ret;
+        }
+
+        /// execute the current command, fill the response to the output buffer of client
+        internal_executor_->execute(query_, client);
+        /// increase the offset in the next decoding
+        offset += res.size();
+        data_ = data_.substr(offset);
+
+        /// propagate this command to the slaves if this is write command
+        int is_write_cmd = (query_.flags & CMD_WRITE) ? 1 : 0;
+        /// validate the write command
+        if (!is_write_cmd)
+            continue;
+
+        /// first, encode the command to RESP
+        std::vector<std::string> replies = encoder_.encode_arr(query_.cmd_args);
+
+        /// second, concat all argv to get the entire response
+        std::string response;
+        for (auto &rely: replies) {
+            response += rely;
+        }
+
+        /// third, loop and fill entire response to output buffer of slaves
+        auto clients = Server::GetInstance()->GetClients();
+        for (const auto &cli: clients) {
+            if (cli->is_slave) {
+                /// FIXME: handle case copy the response to output buffer fail
+//                cli->FillStringToOutBuffer(response);
+                Server::SendData(cli->fd, response.c_str(), response.size());
+            }
+        }
     }
 
     return 0;
 }
 
-ssize_t CommandExecutor::Execute(std::shared_ptr<Client> client) {
-    /// create the executor suit for the current command
-    internal_executor_ = AbstractInternalCommandExecutor::createCommandExecutor(query_.cmd_type);
-    if (!internal_executor_)
+int CommandExecutor::BuildRedisCommand(const resp::unique_value &rep) {
+    /// clean all argv of previous cmd
+    ResetQuery(query_);
+
+    resp::unique_array<resp::unique_value> arr = rep.array();
+    if (arr.size() < 1) {
+        LOG_ERROR(TAG, "less than 1 element in arr");
         return InvalidCommandError;
-//        return "+OK\r\n";
+    }
 
-    internal_executor_->SetSocket(client->fd);
+    /// fill the cmd argv
+    for (int i = 0; i < arr.size(); ++i) {
+        query_.cmd_args.emplace_back(arr[i].bulkstr().data(), arr[i].bulkstr().size());
+    }
 
-    /// execute command
-    return internal_executor_->execute(query_, client);
+    /// mapping with the declared cmds, find the cmd type
+    std::string &cmd_name = query_.cmd_args[0];
+    std::transform(cmd_name.begin(), cmd_name.end(), cmd_name.begin(), ::tolower);
+    auto rcmd = Server::GetInstance()->GetRedisCommand(cmd_name);
+    if (rcmd == nullptr) {
+        LOG_ERROR(TAG, "Command %s is not supported nowadays", cmd_name.c_str());
+        return InvalidCommandError;
+    }
+
+    /// update the cmd type
+    int has_subcmd = (rcmd->subcmd_dict.empty()) ? 0 : 1;
+    if (has_subcmd) {
+        if (query_.cmd_args.size() <= 1) {
+            return InvalidCommandError;
+        } else {
+            std::string &subcmd = query_.cmd_args[1];
+            std::transform(subcmd.begin(), subcmd.end(), subcmd.begin(), ::tolower);
+            auto it = rcmd->subcmd_dict.find(subcmd);
+            if (it == rcmd->subcmd_dict.end()) {
+                return InvalidCommandError;
+            } else {
+                query_.cmd = it->second;
+                query_.flags = it->second->flags;
+            }
+        }
+    }
+    else {
+        query_.cmd = rcmd;
+        query_.flags = rcmd->flags;
+    }
+
+    return 0;
+}
+
+int CommandExecutor::BuildExecutor() {
+    if (!query_.cmd)
+        return BuildExecutorError;
+
+    /// create the executor by cmd_type
+    internal_executor_ = AbstractInternalCommandExecutor::createCommandExecutor(query_.cmd->cmd_type);
+    if (!internal_executor_)
+        return BuildExecutorError;
+
+    return 0;
 }

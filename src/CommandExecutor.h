@@ -23,13 +23,15 @@ public:
 
     ~CommandExecutor() = default;
 
-    /// receive and decode. return 0 with completed command, otherwise return the error in RedisError.h
-    int ReceiveData(const std::string &buffer);
-
-    ssize_t Execute(std::shared_ptr<Client> client);
+    /// append available data to buffer.
+    /// One by one, try to decode a command from buffer, execute it utils could not decode new command
+    int ReceiveDataAndExecute(const std::string &buffer, std::shared_ptr<Client> client);
 
 private:
     /// private method
+    int BuildRedisCommand(const resp::unique_value &rep);
+
+    int BuildExecutor();
 
 private:
     resp::encoder<std::string> encoder_;

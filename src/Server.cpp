@@ -42,43 +42,6 @@ Server::~Server() {
     close(server_fd_);
 }
 
-static std::string get_response2(const std::string &query) {
-    CommandExecutor ce;
-//    ce.ReceiveRequest(query);
-
-//    return ce.Execute();
-}
-
-static void receive_and_send(int fd) {
-    LOG_INFO(TAG, "Client connected");
-
-    fd_set readfds;
-    FD_ZERO(&readfds);
-    FD_SET(fd, &readfds);
-    struct timeval timeout;
-    timeout.tv_sec = 2;
-    timeout.tv_usec = 0;
-
-    char buffer[4096] = {0};
-    while (true) {
-        select(fd + 1, &readfds, NULL, NULL, &timeout);
-        ssize_t recv_bytes = recv(fd, (void *) buffer, 4095, 0);
-        if (recv_bytes < 0) {
-            std::cerr << "Receive from client failed: " << errno << ", msg: " << strerror(errno) << std::endl;
-            break;
-        } else if (recv_bytes == 0) {
-            continue;
-        }
-
-        buffer[recv_bytes] = '\0';
-        std::string received_data(buffer);
-
-        std::string response = get_response2(received_data);
-
-        ssize_t sent_bytes = send(fd, response.c_str(), response.size(), 0);
-    }
-}
-
 int Server::HandShake(int fd) {
     fd_set readfds;
     FD_ZERO(&readfds);
@@ -134,7 +97,6 @@ int Server::HandShake(int fd) {
 
 int Server::Start() {
     listening_ = true;
-//    std::thread t(&Server::ProcessClientData, this);
 
     server_fd_ = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd_ < 0) {
@@ -262,6 +224,9 @@ std::string Server::ShowReplicationInfo() const {
 }
 
 int Server::Setup() {
+    /// 0. setup commands
+    SetupCommands();
+
     /// 1. setup the replica
     int ret = SetupReplica();
 
@@ -339,12 +304,11 @@ int Server::ProcessClientData(const fd_set &read_fds) {
 
             buffer[recv_bytes] = '\0';
             std::string received_data(buffer);
+
             /// handle the new data
-            int ret = client->executor.ReceiveData(received_data);
+            int ret = client->executor.ReceiveDataAndExecute(received_data, client);
             if (ret == 0) {
-                LOG_DEBUG(TAG, "execute data %s and send through fd %d", buffer, fd);
-                /// execute the query and respond
-                client->executor.Execute(client);
+                LOG_DEBUG(TAG, "Successfully receives data %s and response to client %d", buffer, client->fd);
             } else {
                 LOG_DEBUG(TAG, "Parse received data %s failed", buffer)
             }
@@ -399,10 +363,6 @@ ssize_t Server::SendData(const int fd, const char *data, ssize_t len) {
             }
             total_sent += sent;
         }
-
-//        std::cout << "Send through fd " << fd << " successfully " << total_sent << " bytes" << std::endl;
-
-//        usleep(10000);
 
         return total_sent;
     }
@@ -461,28 +421,30 @@ void Server::CheckChildrenDone() {
 
 void Server::OnSaveRdbBackgroundDone(const int exitcode) {
     /// TODO: update state???
-
+    LOG_ERROR(TAG, "there are %lu clients of this server", clients_.size());
     /// possibly there are some slaves waiting for. Transfer dump file .rdb
     if (exitcode == 0) {
         std::lock_guard<std::mutex> lock(clients_mutex_);
         for (auto &client: clients_) {
+            LOG_ERROR(TAG, "Try to propagate rdb to client fd %d, is_slave %u", client->fd, client->is_slave);
             if (client->is_slave && client->slave_state == SlaveState::WaitBGSaveEnd) {
-                FullSyncRdbToReplica(client);
+                ssize_t total_sent = FullSyncRdbToReplica(client);
+                /// FIXME: handle when sent partially
             }
         }
     }
 }
 
-void Server::FullSyncRdbToReplica(const std::shared_ptr<Client> &slave) {
+ssize_t Server::FullSyncRdbToReplica(const std::shared_ptr<Client> &slave) {
     std::string rdb_file_path = Database::GetInstance()->GetRdbPath();
     char prefix_rdb[20] = {0};
-    ssize_t rdb_size = 0;
+    ssize_t rdb_size = 0, total_sent = 0;
 
-    LOG_DEBUG(TAG, "start send replica prefix through fd %d", slave->fd);
+    LOG_DEBUG(TAG, "start sending replica prefix through fd %d", slave->fd);
     struct stat st;
     if (RdbStat(rdb_file_path, st) < 0) {
         std::cerr << "Stat() file " << rdb_file_path << "error " << strerror(errno) << std::endl;
-        return;
+        return 0;
     } else {
         rdb_size = st.st_size;
     }
@@ -492,7 +454,7 @@ void Server::FullSyncRdbToReplica(const std::shared_ptr<Client> &slave) {
 
     /** send data */
     ///  First, send the length of rdb
-    SendData(slave_fd, prefix_rdb, strlen(prefix_rdb));
+    total_sent += SendData(slave_fd, prefix_rdb, strlen(prefix_rdb));
 
     ///  Second, read and send binary rdb
     FILE *rdb_file = fopen(rdb_file_path.c_str(), "rb");
@@ -504,7 +466,7 @@ void Server::FullSyncRdbToReplica(const std::shared_ptr<Client> &slave) {
             if (read_bytes > 0) {
                 ssize_t sent_bytes = SendData(slave_fd, buf, read_bytes);
                 if (sent_bytes < 0) {
-                    /// sent fail
+                    /// FIXME: handle when sent fail
                 }
                 offset += read_bytes;
             } else {
@@ -514,8 +476,65 @@ void Server::FullSyncRdbToReplica(const std::shared_ptr<Client> &slave) {
                 break;
             }
         }
+        total_sent += offset;
         fclose(rdb_file);
     } else {
         std::cerr << "Open file " << rdb_file_path << " error: " << strerror(errno) << std::endl;
     }
+
+    return total_sent;
 }
+
+RedisCmd *Server::GetRedisCommand(const std::string &cmd_name) {
+    try {
+        return global_commands_.at(cmd_name);
+    } catch (std::exception &ex) {
+        return nullptr;
+    }
+}
+
+void Server::AddCommand(const std::string &command, CommandType type, uint64_t flag) {
+    try {
+        auto rcmd = global_commands_.at(command);
+        rcmd->cmd_type = type;
+        rcmd->flags |= flag;
+    }
+    catch (std::exception &ex) {
+        global_commands_[command] = new RedisCmd(type, flag);
+    }
+}
+
+void
+Server::AddCommand(const std::string &command, const std::string &subcmd, CommandType type, uint64_t flag) {
+    RedisCmd *rcmd = nullptr;
+    try {
+        rcmd = global_commands_.at(command);
+    }
+    catch (std::exception &ex) {
+        global_commands_[command] = new RedisCmd(type, flag);
+        rcmd = global_commands_[command];
+    }
+
+    rcmd->subcmd_dict[subcmd] = new RedisCmd(type, flag);
+}
+
+int Server::SetupCommands() {
+
+    AddCommand("echo", EchoCmd, CMD_READ);
+
+    AddCommand("get", GetCmd, CMD_READ);
+    AddCommand("set", SetCmd, CMD_WRITE);
+
+    AddCommand("ping", PingCmd, CMD_READ);
+
+    AddCommand("config", "get", ConfigGetCmd, CMD_READ);
+    AddCommand("config", "set", ConfigSetCmd, CMD_WRITE);
+
+    AddCommand("keys", KeysCmd, CMD_READ);
+    AddCommand("info", InfoCmd, CMD_READ);
+    AddCommand("replconf", ReplconfCmd, CMD_READ);
+    AddCommand("psync", PSyncCmd, CMD_READ);
+
+    return 0;
+}
+

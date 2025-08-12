@@ -23,7 +23,8 @@ std::string EncodeRespSimpleStr(std::string s) {
 }
 
 void ResetQuery(Query &query) {
-    query.cmd_type = UnknownCmd;
+    query.cmd = nullptr;
+    query.flags = 0;
     query.cmd_args.clear();
 }
 

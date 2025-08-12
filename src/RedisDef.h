@@ -36,4 +36,9 @@ extern const char TAG[];
     }                                                                                               \
 }
 
+#define LOG_LINE() { \
+    printf("%s:%d:%s\n", __FILE__, __LINE__, __FUNCTION__); \
+    fflush(stdout);      \
+}\
+
 #endif //REDIS_STARTER_CPP_REDISDEF_H

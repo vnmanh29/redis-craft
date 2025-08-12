@@ -36,14 +36,20 @@ typedef struct ReplicationInfo {
     }
 } ReplicationInfo;
 
+/// States of the slave in master server
 enum SlaveState {
     WaitBGSaveStart = 1,
     WaitBGSaveEnd = 2,
 };
 
+#define BUF_SIZE 4096
+
 typedef struct Client {
-    int fd;                   /// the socket connects to this client
     int active;
+    int fd;                        /// the socket connects to this client
+    char out_buf[BUF_SIZE];
+    size_t buf_pos;                /// total bytes in buffer
+    size_t sent_len;               /// how many bytes already sent -> need to send the data in buffer range [sent_len -> buf_pos-1]
 
     int is_slave;
     int slave_state;
@@ -55,6 +61,19 @@ typedef struct Client {
     ~Client() {
         close(fd);
     }
+
+    size_t FillStringToOutBuffer(const std::string &s) {
+        if (buf_pos + s.size() >= BUF_SIZE) {
+            LOG_INFO(TAG, "Overflow, retry later");
+            return 0;
+        }
+        memcpy(out_buf + buf_pos, s.c_str(), s.size());
+        buf_pos += s.size();
+
+        /// return the number of unsent bytes in buffer
+        return buf_pos - sent_len + 1;
+    }
+
 } Client;
 
 class Server {
@@ -76,10 +95,14 @@ private:
 
     int child_info_pipe_[2];
 
+    std::unordered_map<std::string, RedisCmd *> global_commands_;
+
 private:
     Server() = default;
 
     int SetupReplica();
+
+    int SetupCommands();
 
     int HandShake(int fd);
 
@@ -89,7 +112,11 @@ private:
 
     void OnSaveRdbBackgroundDone(const int exitcode);
 
-    void FullSyncRdbToReplica(const std::shared_ptr<Client> &slave);
+    ssize_t FullSyncRdbToReplica(const std::shared_ptr<Client> &slave);
+
+    void AddCommand(const std::string& command, CommandType type, uint64_t flag);
+
+    void AddCommand(const std::string& command, const std::string& subcmd, CommandType type, uint64_t flag);
 
 public:
     Server &operator=(const Server &sv) = delete;
@@ -128,6 +155,10 @@ public:
     int GetChildInfoReadPipe() { return child_info_pipe_[0]; }
 
     int GetChildInfoWritePipe() { return child_info_pipe_[1]; }
+
+    std::vector<std::shared_ptr<Client>> GetClients() const { return clients_; }
+
+    RedisCmd *GetRedisCommand(const std::string& cmd_name);
 };
 
 

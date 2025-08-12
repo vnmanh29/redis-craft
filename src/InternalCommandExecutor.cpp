@@ -15,7 +15,7 @@ class EchoCommandExecutor : public AbstractInternalCommandExecutor {
 
         std::string response = enc.encode_bulk_str(query.cmd_args[1], query.cmd_args[1].size());
 
-        int fd = GetSocket();
+        int fd = client->fd;
 
         return Server::SendData(fd, response.c_str(), response.size());
     }
@@ -46,7 +46,7 @@ private:
 
     ssize_t execute(const Query &query, std::shared_ptr<Client> client) override {
         std::string response = GetResponse(query);
-        int fd = GetSocket();
+        int fd = client->fd;
         if (response.empty() || fd < 0)
             return -1;
 
@@ -119,7 +119,7 @@ public:
         std::string response = GetResponse(query);
         if (response.empty())
             return InvalidResponseError;
-        int fd = GetSocket();
+        int fd = client->fd;
 
         return Server::SendData(fd, response.c_str(), response.size());
     }
@@ -131,7 +131,7 @@ class PingCommandExecutor : public AbstractInternalCommandExecutor {
         if (query.cmd_args.size() < 1)
             return InvalidCommandError;
 
-        int fd = GetSocket();
+        int fd = client->fd;
         std::string response = "+PONG\r\n";
 
         return Server::SendData(fd, response.c_str(), response.size());
@@ -173,7 +173,7 @@ public:
             return InvalidResponseError;
         }
 
-        int fd = GetSocket();
+        int fd = client->fd;
         return Server::SendData(fd, response.c_str(), response.size());
     }
 };
@@ -205,7 +205,7 @@ public:
             return InvalidResponseError;
         }
 
-        int fd = GetSocket();
+        int fd = client->fd;
         return Server::SendData(fd, response.c_str(), response.size());
     }
 
@@ -234,7 +234,7 @@ private:
 public:
     ssize_t execute(const Query &query, std::shared_ptr<Client> client) override {
         std::string response = GetResponse(query);
-        int fd = GetSocket();
+        int fd = client->fd;
 
         if (fd < 0 || response.empty())
             return InvalidResponseError;
@@ -247,7 +247,7 @@ class ReplconfCommandExecutor : public AbstractInternalCommandExecutor {
     ssize_t execute(const Query &query, std::shared_ptr<Client> client) override {
         /// TODO: handle the argument
         std::string response = "+OK\r\n";
-        int fd = GetSocket();
+        int fd = client->fd;
 
         /// set it become slave server
         client->is_slave = 1;
@@ -259,7 +259,7 @@ class ReplconfCommandExecutor : public AbstractInternalCommandExecutor {
 
 class PSyncCommandExecutor : public AbstractInternalCommandExecutor {
     ssize_t execute(const Query &query, std::shared_ptr<Client> client) override {
-        int fd = GetSocket();
+        int fd = client->fd;
         if (fd < 0) {
             LOG_ERROR(TAG, "Invalid fd %d", fd)
             return InvalidSocketError;
@@ -290,7 +290,7 @@ class PSyncCommandExecutor : public AbstractInternalCommandExecutor {
 class UnknownCommandExecutor : public AbstractInternalCommandExecutor {
     ssize_t execute(const Query &query, std::shared_ptr<Client> client) override {
         std::string response = "+OK\r\n";
-        int fd = GetSocket();
+        int fd = client->fd;
 
         if (fd < 0)
             return InvalidSocketError;
@@ -316,7 +316,7 @@ AbstractInternalCommandExecutor::createCommandExecutor(const CommandType cmd_typ
             return std::make_shared<KeysCommandExecutor>();
         case InfoCmd:
             return std::make_shared<InfoCommandExecutor>();
-        case ReplcofCmd:
+        case ReplconfCmd:
             return std::make_shared<ReplconfCommandExecutor>();
         case PSyncCmd:
             return std::make_shared<PSyncCommandExecutor>();

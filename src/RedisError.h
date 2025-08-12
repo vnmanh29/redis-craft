@@ -6,6 +6,7 @@
 #define REDIS_STARTER_CPP_REDISERROR_H
 
 enum Error {
+    RedisSuccess = 0,
 
     /// critical errors
     CreateSocketError = -1,
@@ -18,6 +19,7 @@ enum Error {
     InvalidResponseError = -8,
     InvalidSocketError = -9,
     SentDataError = -10,
+    BuildExecutorError = -11,
 
 
     /// retriable errors
