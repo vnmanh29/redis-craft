@@ -36,29 +36,37 @@ int CommandExecutor::ReceiveDataAndExecute(const std::string &buffer, std::share
         int ret = BuildRedisCommand(rep);
         if (ret < 0) {
             LOG_ERROR(TAG, "NOT found the suitable cmd, err %d", ret);
-#if RELEASE
-            return ret;
-#else // RELEASE
+#if HARDCODE
             query_.cmd = new RedisCmd(UnknownCmd, CMD_READ);
-#endif // RELEASE
+#else // HARDCODE
+            return ret;
+#endif // HARDCODE
+        } else {
+            LOG_INFO(TAG, "build cmd %d success flag %llu", query_.cmd->cmd_type, query_.cmd->flags);
         }
 
         ret = BuildExecutor();
         if (ret < 0) {
             LOG_ERROR(TAG, "Build executor fail, error %d", ret);
+            data_ = data_.substr(offset);
             return ret;
         }
 
         /// execute the current command, fill the response to the output buffer of client
         internal_executor_->execute(query_, client);
+        LOG_DEBUG("", "data %s, offset %lu", data_.c_str(), offset);
         /// increase the offset in the next decoding
         offset += res.size();
-        data_ = data_.substr(offset);
+        LOG_DEBUG("", "remain data %s", data_.c_str());
 
         /// propagate this command to the slaves if this is write command
         int is_write_cmd = (query_.flags & CMD_WRITE) ? 1 : 0;
         /// validate the write command
         if (!is_write_cmd)
+            continue;
+
+        /// FIXME: handle case replica server received the command from its master
+        if (client->ClientType() == TypeMaster)
             continue;
 
         /// first, encode the command to RESP
@@ -72,18 +80,15 @@ int CommandExecutor::ReceiveDataAndExecute(const std::string &buffer, std::share
 
         /// third, loop and fill entire response to output buffer of slaves
         auto clients = Server::GetInstance()->GetClients();
-        for (const auto &cli: clients) {
-            if (cli->is_slave) {
+        for (const auto &cli : clients) {
+            if (cli->ClientType() == ClientType::TypeSlave) {
                 /// FIXME: handle case copy the response to output buffer fail
-//                size_t out_buffer_size = cli->FillStringToOutBuffer(response);
-//                if (out_buffer_size > 0) {
-//                    /// TODO: set this fd to write fd_set in next loop
-//
-//                }
-                ssize_t ret = Server::SendData(cli->fd, response.c_str(), response.size());
+                LOG_DEBUG(TAG, "send %s through sock %d", response.c_str(), cli->Socket().native_handle());
+                cli->WriteAsync(response);
             }
         }
     }
+    data_ = data_.substr(offset);
 
     return 0;
 }
@@ -128,8 +133,7 @@ int CommandExecutor::BuildRedisCommand(const resp::unique_value &rep) {
                 query_.flags = it->second->flags;
             }
         }
-    }
-    else {
+    } else {
         query_.cmd = rcmd;
         query_.flags = rcmd->flags;
     }

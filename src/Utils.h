@@ -13,6 +13,7 @@
 #define DEFAULT_REDIS_PORT 6379
 
 #define DEFAULT_MASTER_REPLID "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
+#define MASTER_ID_LENGTH 40
 
 #define CMD_WRITE (1<<1)
 #define CMD_READ  (1<<2)
@@ -28,6 +29,7 @@ enum CommandType {
     InfoCmd,
     ReplconfCmd,
     PSyncCmd,
+    FullresyncCmd,
     UnknownCmd
 };
 
@@ -46,7 +48,7 @@ typedef struct Query {
 } Query;
 
 /// input: array of strings. Output: a string presents RESP Array
-std::string EncodeArr2RespArr(std::vector<std::string> &arr);
+std::string EncodeArr2RespArr(std::vector<std::string> arr);
 
 std::string EncodeRespSimpleStr(std::string s);
 

@@ -14,7 +14,7 @@
 #include "Utils.h"
 #include "Database.h"
 
-typedef struct Client Client;
+class Client;
 
 class AbstractInternalCommandExecutor : public std::enable_shared_from_this<AbstractInternalCommandExecutor> {
 private:
@@ -25,7 +25,7 @@ public:
 
     virtual ~AbstractInternalCommandExecutor() = default;
 
-    virtual ssize_t execute(const Query &query, std::shared_ptr<Client> client) = 0;
+    virtual void execute(const Query &query, std::shared_ptr<Client> client) = 0;
 
     static std::shared_ptr<AbstractInternalCommandExecutor> createCommandExecutor(CommandType cmd_type);
 

@@ -20,10 +20,16 @@ enum Error {
     InvalidSocketError = -9,
     SentDataError = -10,
     BuildExecutorError = -11,
+    OpenRdbFileError = -12,
+    ReceiveRdbFileError = -13,
+    SyncWriteError = -14,
+    SyncReadError = -15,
 
 
     /// retriable errors
-    IncompletedCommand = -20,
+    IncompletedCommand = -30,
+
+    UnknownError = -101,
 };
 
 #endif //REDIS_STARTER_CPP_REDISERROR_H

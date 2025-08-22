@@ -24,167 +24,32 @@
 #include <thread>
 #include <vector>
 
+#include "asio.hpp"
+
 Server *Server::instance_{nullptr};
 std::mutex Server::m_;
+asio::io_context global_context;
 
 Server *Server::GetInstance() {
     std::lock_guard lock(m_);
     if (instance_ == nullptr) {
-        instance_ = new Server();
+        instance_ = new Server(global_context);
     }
     return instance_;
 }
 
 Server::~Server() {
-
-    close(replica_fd_);
-
-    close(server_fd_);
-}
-
-int Server::HandShake(int fd) {
-    fd_set readfds;
-    FD_ZERO(&readfds);
-    FD_SET(fd, &readfds);
-    struct timeval timeout;
-    timeout.tv_sec = 2;
-    timeout.tv_usec = 0;
-
-    /// TODO: build the list message instead of hardcode
-    std::vector<std::vector<std::string>> handshake_msgs = {
-            {"ping"},
-            {"replconf", "listening-port", std::to_string(port_)},
-            {"replconf", "capa",           "psync2"},
-            {"psync",    "?",              "-1"},
-    };
-
-    char buffer[4096] = {0};
-    for (int idx = 0; idx < handshake_msgs.size(); ++idx) {
-        // build RESP message
-        auto &arr = handshake_msgs[idx];
-
-        auto request = EncodeArr2RespArr(arr);
-        ssize_t sent_bytes = send(fd, request.c_str(), request.size(), 0);
-        if (sent_bytes < 0) {
-            LOG_ERROR(TAG, "Make hand-shake fail at step %d", idx)
-            return HandShakeSendError;
-        }
-
-        int ready = select(fd + 1, &readfds, NULL, NULL, &timeout);
-        if (ready < 0) {
-            LOG_ERROR(TAG, "select the fail, errno %s", strerror(errno));
-            return HandShakeFdError;
-        }
-        ssize_t recv_bytes = recv(fd, (void *) buffer, 4095, 0);
-        if (recv_bytes < 0) {
-            LOG_ERROR(TAG, "Receive from client failed: %d, msg: %s", errno, strerror(errno));
-            return HandShakeRecvError;
-        } else if (recv_bytes == 0) {
-            continue;
-        }
-
-        buffer[recv_bytes] = '\0';
-        std::string received_data(buffer);
-        /// TODO: handle received data
-
-    }
-
-    close(fd);
-
-    return 0;
+    acceptor_.close();
+    replica_socket_.close();
+    LOG_INFO("Server", "Destructor server instance");
 }
 
 int Server::Start() {
-    listening_ = true;
+    CheckChildrenDone();
 
-    server_fd_ = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd_ < 0) {
-        LOG_ERROR(TAG, "Failed to create server socket");
-        return 1;
-    }
-
-    // Since the tester restarts your program quite often, setting SO_REUSEADDR
-    // ensures that we don't run into 'Address already in use' errors
-    int reuse = 1;
-    if (setsockopt(server_fd_, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
-        LOG_ERROR(TAG, "setsockopt failed");
-        return 1;
-    }
-
-    struct sockaddr_in server_addr;
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr = INADDR_ANY;
-    server_addr.sin_port = htons(port_);
-
-    if (bind(server_fd_, (struct sockaddr *) &server_addr, sizeof(server_addr)) != 0) {
-        LOG_ERROR(TAG, "Failed to bind to port %d", DEFAULT_REDIS_PORT)
-        return 1;
-    }
-
-    // Set the server socket to non-blocking mode
-    if (fcntl(server_fd_, F_SETFL, O_NONBLOCK) < 0) {
-        perror("fcntl failed");
-        close(server_fd_);
-        exit(EXIT_FAILURE);
-    }
-
-    int connection_backlog = 5;
-    if (listen(server_fd_, connection_backlog) != 0) {
-        std::cerr << "listen failed\n";
-        return 1;
-    }
-
-    struct sockaddr_in client_addr;
-    int client_addr_len = sizeof(client_addr);
-    LOG_INFO(TAG, "Waiting for a client to connect...");
-
-    while (true) {
-        /// check the end of child proc
-        CheckChildrenDone();
-
-        int max_fd = server_fd_;
-
-        /// initialize the read_fd
-        fd_set read_fds;
-        FD_ZERO(&read_fds);
-        /// add server socket to monitor for new connection
-        FD_SET(server_fd_, &read_fds);
-        /// add all active clients to monitor for new connection
-        {
-            std::lock_guard lock(clients_mutex_);
-            for (auto &client: clients_) {
-                if (client->active) {
-                    FD_SET(client->fd, &read_fds);
-                    max_fd = std::max(max_fd, client->fd);
-                }
-            }
-        }
-
-        struct timeval timeout;
-        timeout.tv_sec = 1;
-        timeout.tv_usec = 0;
-
-        // probe the activity
-        int activity = select(max_fd + 1, &read_fds, NULL, NULL, &timeout);
-        if (activity < 0) {
-            /// FIXME: handle error
-        } else if (activity == 0) {
-            /// timeout, continue probe
-            continue;
-        }
-
-        /// check for new connection on server socket
-        if (FD_ISSET(server_fd_, &read_fds)) {
-            int client_fd = accept(server_fd_, (struct sockaddr *) &client_addr, (socklen_t *) &client_addr_len);
-            if (client_fd >= 0) {
-                std::lock_guard lock(clients_mutex_);
-                clients_.push_back(std::make_shared<Client>(client_fd));
-                LOG_INFO(TAG, "New client connected on fd %d", client_fd);
-            }
-        }
-
-        ProcessClientData(read_fds);
-    }
+    acceptor_ = tcp::acceptor(io_context_, {tcp::v4(), port_});
+    DoAccept();
+    io_context_.run();
 
     return 0;
 }
@@ -195,7 +60,7 @@ void Server::SetConfig(const std::shared_ptr<RedisConfig> &cfg) {
         port_ = cfg->port;
 
         if (cfg->is_replica) {
-            replication_info_.role = ReplicationInfo::ReplicationRole::Slave;
+            replication_info_.role = ReplicationRole::Slave;
 
             replication_info_.is_replica = cfg->is_replica;
             replication_info_.master_host = cfg->master_host;
@@ -208,7 +73,7 @@ std::string Server::ShowReplicationInfo() const {
     std::stringstream ss;
 
     ss << "role:";
-    ss << ((replication_info_.role == ReplicationInfo::Master) ? "master" : "slave") << CRLF;
+    ss << ((replication_info_.role == ReplicationRole::Master) ? "master" : "slave") << CRLF;
 
     ss << "connected_slave:" << replication_info_.connected_slaves << CRLF;
     ss << "master_replid:" << replication_info_.master_replid << CRLF;
@@ -227,146 +92,119 @@ int Server::Setup() {
     SetupCommands();
 
     /// 1. setup the replica
-    int ret = SetupReplica();
+    int ret = SyncWithMaster();
 
     return ret;
 }
 
-int Server::SetupReplica() {
+int Server::SyncWithMaster() {
     if (!replication_info_.is_replica)
         return 0;
 
-    replica_fd_ = socket(AF_INET, SOCK_STREAM, 0);
-    if (replica_fd_ < 0) {
-        LOG_ERROR(TAG, "Fail to create replica fd")
-        return CreateSocketError;
-    }
+    /// blocking operation. This method will block until the RDB file is received from the master
+    std::string host = replication_info_.master_host;
+    std::string port = std::to_string(replication_info_.master_port);
+    LOG_DEBUG(TAG, "sync with master server, host: %s, port %s", host.c_str(), port.c_str());
 
-    // Step 2: Resolve hostname to IP address
-    struct hostent *master_server = gethostbyname(replication_info_.master_host.c_str());
-    if (master_server == NULL) {
-        LOG_ERROR(TAG, "No such host: %s\n", replication_info_.master_host.c_str());
-        return GetHostNameError;
-    }
+    try {
+        /// create a client presents for its master server
+        auto master_server = Client::create(io_context_);
+        master_server->SetClientType(ClientType::TypeMaster);
 
-    // Step 3: Set up the sockaddr_in struct
-    struct sockaddr_in master_addr;
-    memset(&master_addr, 0, sizeof(master_addr));
-    master_addr.sin_family = AF_INET;
-    master_addr.sin_port = htons(replication_info_.master_port);
-//    master_addr.sin_addr.s_addr = INADDR_ANY;
-    memcpy(&master_addr.sin_addr.s_addr, master_server->h_addr, master_server->h_length);
-
-    // Step 4: Connect to the server
-    if (connect(replica_fd_, (struct sockaddr *) &master_addr, sizeof(master_addr)) < 0) {
-        perror("connect failed");
-        return SocketConnectError;
-    }
-
-    int ret = HandShake(replica_fd_);
-    if (ret < 0) {
-        LOG_ERROR(TAG, "Handshake fail %d", ret);
-        return ret;
-    }
-
-    return ret;
-}
-
-int Server::ProcessClientData(const fd_set &read_fds) {
-
-    char buffer[4096] = {0};
-
-    std::lock_guard lock(clients_mutex_);
-    /// probe the data from the client sockets
-    for (auto &client: clients_) {
-        if (client->active == 0)
-            continue;
-
-        int fd = client->fd;
-        if (FD_ISSET(fd, &read_fds)) {
-            ssize_t recv_bytes = recv(fd, buffer, 4095, 0);
-            if (recv_bytes < 0) {
-                if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                    /// no data available yet, retry later
-                    continue;
-                } else {
-                    /// a real error occurred
-                    LOG_ERROR(TAG, "Received from fd %d, error %d, msg %s", fd, errno, strerror(errno));
-                    continue;
-                }
-            } else if (recv_bytes == 0) {
-                /// connection was closed by peer
-                client->active = 0;
-                LOG_ERROR(TAG, "closed connection on fd %d", fd);
-                continue;
-            }
-
-            buffer[recv_bytes] = '\0';
-            std::string received_data(buffer);
-
-            /// handle the new data
-            int ret = client->executor.ReceiveDataAndExecute(received_data, client);
-            if (ret == 0) {
-                LOG_DEBUG(TAG, "Successfully receives data %s and response to client %d", buffer, client->fd);
-            } else {
-                LOG_DEBUG(TAG, "Parse received data %s failed", buffer)
-            }
-        }
-    }
-
-    return 0;
-}
-
-ssize_t Server::SendData(const int fd, const char *data, ssize_t len) {
-    size_t total_sent = 0, sent = 0;
-    size_t total_len = len;
-
-    fd_set writefds;
-    FD_ZERO(&writefds);
-    FD_SET(fd, &writefds);
-
-    struct timeval tv;
-    tv.tv_sec = 2;
-    tv.tv_usec = 0;
-
-    int activity = select(fd + 1, NULL, &writefds, NULL, &tv);
-    if (activity <= 0)
-        return SentDataError;
-
-//
-//    int nodelay = 1;
-//    if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (char *)&nodelay, sizeof(nodelay)) < 0)
-//    {
-//        std::cerr << "set fd " << fd << " opt NODELAY fail" << std::endl;
-//    }
-//    else
-//    {
-////        std::cerr << "set fd " << fd << " opt NODELAY success" << std::endl;
-//    }
-
-    if (FD_ISSET(fd, &writefds)) {
-        while (total_sent < total_len) {
-            sent = send(fd, data + total_sent, total_len - total_sent, 0);
-            if (sent == -1) {
-                if (errno == EWOULDBLOCK || errno == EAGAIN) {
-                    // Socket buffer is full, wait and retry later (e.g., using select/poll)
-                    // In a real application, you'd use select/poll to wait for writability
-                    // For simplicity here, we might just sleep briefly or yield control
-//                    usleep(1000); // Sleep for 1ms, for example
-                    continue; // Try sending again
-                }
-                LOG_ERROR(TAG, "Sent %ld bytes, error %s", total_sent, strerror(errno));
-                return Error::SentDataError;
-            } else if (sent == 0) {
-                return Error::SentDataError;
-            }
-            total_sent += sent;
+        int ret = master_server->ConnectSync(io_context_, host, port);
+        if (ret < 0) {
+            LOG_ERROR(TAG, "Connect to host %s, port %s fail", host.c_str(), port.c_str());
+            return SocketConnectError;
         }
 
-        return total_sent;
-    }
+        std::vector<char> buf(128);
+        /// Handshake part
 
-    return 0;
+        LOG_LINE();
+        std::string response;
+        /// 1. PING to master
+        master_server->WriteSync(EncodeArr2RespArr({"PING"}));
+        master_server->ReadSyncWithLength(response, strlen(RESP_PONG));
+        if (strncasecmp(response.data(), RESP_PONG, strlen(RESP_PONG)) != 0) {
+            LOG_ERROR("Handshake", "response of PING: %s, expect %s", response.data(), RESP_PONG);
+            return HandShakeRecvError;
+        }
+
+        LOG_LINE();
+        /// 2. send Replconf to master
+        master_server->WriteSync(EncodeArr2RespArr({"replconf", "listening-port", std::to_string(port_)}));
+        master_server->ReadSyncWithLength(response, strlen(RESP_OK));
+        if (strncasecmp(response.data(), RESP_OK, strlen(RESP_OK)) != 0) {
+            LOG_ERROR("Handshake", "compare %zu bytes response of REPLCONF listening-port: %s, expect %s",
+                      strlen(RESP_OK), response.data(), RESP_OK);
+            return HandShakeRecvError;
+        }
+
+        master_server->WriteSync((EncodeArr2RespArr({"replconf", "capa", "psync2"})));
+        master_server->ReadSyncWithLength(response, strlen(RESP_OK));
+        if (strncasecmp(response.data(), RESP_OK, strlen(RESP_OK)) != 0) {
+            LOG_ERROR("Handshake", "response of REPLCONF capa: %s, expect %s", response.data(), RESP_OK);
+            return HandShakeRecvError;
+        }
+
+        LOG_LINE();
+        /// 3. PSYNC step
+        master_server->WriteSync((EncodeArr2RespArr({"psync", "?", "-1"})));
+
+        /// try to read FULLRESYNC response: read byte by byte util meet '\n'
+        /// FIXME: handle with timeout
+        ret = master_server->ReadSyncNewLine(response);
+        if (ret < 0) {
+            LOG_ERROR(TAG, "read new line from command FULLRESYNC fail");
+            return ret;
+        }
+
+        /// parse 'buf': verify response with token RESP_FULLRESYNC, get master_uid, get offset
+        size_t idx = response.find(' ');
+        if (idx == std::string::npos || response.substr(0, strlen(RESP_FULLRESYNC)) != RESP_FULLRESYNC) {
+            LOG_ERROR(TAG, "Invalid response of PSYNC, not found FULLRESYNC");
+            return HandShakeRecvError;
+        }
+
+        ++idx;
+        size_t idx1 = response.find(' ', idx);
+        if (idx1 == std::string::npos) {
+            LOG_ERROR(TAG, "Invalid master_uid in response of PSYNC");
+            return HandShakeRecvError;
+        }
+
+        replication_info_.master_replid = response.substr(idx, idx1 - idx);
+        replication_info_.master_repl_offset = std::stoll(response.substr(idx1 + 1));
+
+        LOG_LINE();
+        /// 4. Reading file .rdb with async method
+        /// Format of file: $<length_of_file>\r\n<binary_contents_of_file>
+        /// 4.1 read and parse the size of rdb file
+        ret = master_server->ReadSyncNewLine(response);
+        if (ret < 0) {
+            LOG_ERROR(TAG, "read new line to parse the rdb size fail");
+            return SyncReadError;
+        }
+        LOG_LINE();
+        /// 4.2 parse the length
+        if (response.size() <= 1 || response[0] != '$') {
+            LOG_ERROR(TAG, "parse the size of rdb file fail");
+            return InvalidResponseError;
+        }
+
+        LOG_DEBUG("RDB", "response %s", response.c_str());
+        long rdb_filesize = std::stol(response.substr(1));
+        LOG_DEBUG("RDB", "rdb file size %lu", rdb_filesize);
+        ReceiveRdbFromMaster(master_server, rdb_filesize);
+
+        /// TODO: 5. Load rdb file to memory
+
+        return RedisSuccess;
+
+    } catch (const asio::system_error &e) {
+        LOG_ERROR("Asio", "Connect to host %s, port %s fail %d", host.c_str(), port.c_str(), e.code().value());
+        return UnknownError;
+    }
 }
 
 int Server::OpenChildInfoPipe() {
@@ -391,31 +229,43 @@ void Server::CloseChildInfoPipe() {
 }
 
 void Server::CheckChildrenDone() {
-    int status;
-    pid_t pid;
-    if ((pid = waitpid(-1, &status, WNOHANG)) != 0) {
-        if (pid == -1) {
-            /// return there is not any waiting child proc
-            if (errno == ECHILD)
-                return;
+    LOG_LINE();
+    signal_.async_wait(
+            [this](const std::error_code error, const int signal) {
+                // validate the parent proc
+                if (acceptor_.is_open()) {
+                    LOG_LINE();
+                    int status = 0;
+                    pid_t pid;
+                    if ((pid = waitpid(-1, &status, WNOHANG)) != 0) {
+                        if (pid == -1) {
+                            /// return there is not any waiting child proc
+                            if (errno == ECHILD)
+                                return;
+                            LOG_ERROR(TAG, "waitpid() returned an error: %s, child proc %d", strerror(errno),
+                                      child_pid_);
+                            /// TODO: handle error
+                        } else {
+                            /// handle by exit code, the child proc type
+                            int exitcode = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 
-            LOG_ERROR(TAG, "waitpid() returned an error: %s, child proc %d", strerror(errno), child_pid_);
+                            if (pid == child_pid_) {
+                                LOG_DEBUG(TAG, "Handle the child proc %d exit with status %d, exitcode %d", pid, status,
+                                          exitcode)
+                                /// TODO: handle the result of child proc in parent proc
+                                OnSaveRdbBackgroundDone(exitcode);
+                            } else {
+                                LOG_ERROR(TAG, "Conflict between child proc %d and finished pid %d", child_pid_, pid)
+                                /// TODO: handle conflict
+                            }
+                        }
+                    }
 
-            /// handle error
-        } else {
-            /// handle by exit code, the child proc type
-            int exitcode = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-
-            if (pid == child_pid_) {
-                LOG_DEBUG(TAG, "Handle the child proc %d exit with status %d, exitcode %d", pid, status, exitcode)
-                /// TODO: handle the result of child proc in parent proc
-                OnSaveRdbBackgroundDone(exitcode);
-            } else {
-                LOG_ERROR(TAG, "Conflict between child proc %d and finished pid %d", child_pid_, pid)
-                /// TODO: handle conflict
-            }
-        }
-    }
+                    CheckChildrenDone();
+                } else {
+                    LOG_LINE();
+                }
+            });
 }
 
 void Server::OnSaveRdbBackgroundDone(const int exitcode) {
@@ -423,15 +273,16 @@ void Server::OnSaveRdbBackgroundDone(const int exitcode) {
     LOG_ERROR(TAG, "there are %lu clients of this server", clients_.size());
     /// possibly there are some slaves waiting for. Transfer dump file .rdb
     if (exitcode == 0) {
-        std::lock_guard<std::mutex> lock(clients_mutex_);
         for (auto &client: clients_) {
-            LOG_ERROR(TAG, "Try to propagate rdb to client fd %d, is_slave %u", client->fd, client->is_slave);
-            if (client->is_slave && client->slave_state == SlaveState::WaitBGSaveEnd) {
+            LOG_ERROR(TAG, "Try to propagate rdb to client sock %d, client type %u", client->Socket().native_handle(),
+                      client->ClientType());
+            if (client->ClientType() == TypeSlave && client->SlaveState() == SlaveState::WaitBGSaveEnd) {
                 ssize_t total_sent = FullSyncRdbToReplica(client);
                 /// FIXME: handle when sent partially
             }
         }
     }
+    LOG_LINE()
 }
 
 ssize_t Server::FullSyncRdbToReplica(const std::shared_ptr<Client> &slave) {
@@ -439,7 +290,7 @@ ssize_t Server::FullSyncRdbToReplica(const std::shared_ptr<Client> &slave) {
     char prefix_rdb[20] = {0};
     ssize_t rdb_size = 0, total_sent = 0;
 
-    LOG_DEBUG(TAG, "start sending replica prefix through fd %d", slave->fd);
+    LOG_DEBUG(TAG, "start sending replica prefix through fd %d", slave->Socket().native_handle());
     struct stat st;
     if (RdbStat(rdb_file_path, st) < 0) {
         std::cerr << "Stat() file " << rdb_file_path << "error " << strerror(errno) << std::endl;
@@ -449,39 +300,18 @@ ssize_t Server::FullSyncRdbToReplica(const std::shared_ptr<Client> &slave) {
     }
 
     snprintf(prefix_rdb, 19, "$%lld\r\n", rdb_size);
-    int slave_fd = slave->fd;
 
     /** send data */
     ///  First, send the length of rdb
-    total_sent += SendData(slave_fd, prefix_rdb, strlen(prefix_rdb));
+    slave->WriteSync(prefix_rdb);
 
-    ///  Second, read and send binary rdb
-    FILE *rdb_file = fopen(rdb_file_path.c_str(), "rb");
-    if (rdb_file) {
-        ssize_t offset = 0;
-        char buf[16 * 1024] = {0};
-        while (offset < rdb_size) {
-            size_t read_bytes = fread(buf, sizeof(char), 16 * 1024, rdb_file);
-            if (read_bytes > 0) {
-                ssize_t sent_bytes = SendData(slave_fd, buf, read_bytes);
-                if (sent_bytes < 0) {
-                    /// FIXME: handle when sent fail
-                }
-                offset += read_bytes;
-            } else {
-                if (ferror(rdb_file)) {
-                    LOG_DEBUG(TAG, "Sent %ld bytes, there are total %ld bytes", offset, rdb_size);
-                }
-                break;
-            }
-        }
-        total_sent += offset;
-        fclose(rdb_file);
-    } else {
-        std::cerr << "Open file " << rdb_file_path << " error: " << strerror(errno) << std::endl;
-    }
+    /// Second, read and send binary rdb
+    /// because MACOSX does not support ASIO_HAS_IO_URING, so we use normal blocking file read/write
+    std::shared_ptr<std::ifstream> pfile = std::make_shared<std::ifstream>(rdb_file_path);
 
-    slave->slave_state = SlaveState::SlaveOnline;
+    slave->WriteStreamFileAsync(pfile);
+    LOG_LINE();
+
     return total_sent;
 }
 
@@ -538,3 +368,39 @@ int Server::SetupCommands() {
     return 0;
 }
 
+int Server::ReceiveRdbFromMaster(std::shared_ptr<Client> master_server, const long total_size) {
+    /**
+     * 1. discard all data in current database */
+    Database::GetInstance()->Reset();
+
+    /**
+     * 2. Create a temporary file in disk */
+    std::string tmp_file_path = Database::GetInstance()->GetRdbPath();
+    FILE *ptmp_file = fopen(tmp_file_path.c_str(), "wb");
+    if (!ptmp_file) {
+        LOG_ERROR(TAG, "open temp file %s fail %s", tmp_file_path.c_str(), strerror(errno));
+        return OpenRdbFileError;
+    }
+
+    /**
+     * 3. Read incoming data */
+    master_server->ReadBulkAsyncWriteFile(total_size, 0, ptmp_file);
+
+    LOG_LINE()
+    return (replication_info_.replica_state == ReplicationState::ReplStateSynced);
+}
+
+void Server::DoAccept() {
+    LOG_DEBUG(TAG, "wait new connection ...");
+    acceptor_.async_accept([this](const std::error_code &error, tcp::socket socket) {
+        if (!error) {
+            auto client = Client::CreateBindSocket(io_context_, std::move(socket));
+            LOG_INFO(TAG, "New connection, start receiving data from the client sock %d",
+                     client->Socket().native_handle());
+            clients_.push_back(client);
+            client->ReadAsync();
+        }
+
+        DoAccept();
+    });
+}

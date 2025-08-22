@@ -7,17 +7,15 @@
 #include "RedisError.h"
 
 class EchoCommandExecutor : public AbstractInternalCommandExecutor {
-    ssize_t execute(const Query &query, std::shared_ptr<Client> client) override {
+    void execute(const Query &query, std::shared_ptr<Client> client) override {
         if (query.cmd_args.size() < 2)
-            return {};
+            return;
 
         resp::encoder<std::string> enc;
 
         std::string response = enc.encode_bulk_str(query.cmd_args[1], query.cmd_args[1].size());
 
-        int fd = client->fd;
-
-        return Server::SendData(fd, response.c_str(), response.size());
+        client->WriteAsync(response);
     }
 };
 
@@ -34,7 +32,7 @@ private:
         std::string resp = Database::GetInstance()->RetrieveValueOfKey(query.cmd_args[1]);
 
         if (resp.empty()) {
-            LOG_ERROR(TAG, "GetCommandExecutor: Key not found");
+            LOG_ERROR(TAG, "GetCommandExecutor: Key %s not found", query.cmd_args[1].c_str());
             return "$-1\r\n"; // RESP format for nil
         } else {
             resp::encoder<std::string> encoder;
@@ -44,13 +42,12 @@ private:
         }
     }
 
-    ssize_t execute(const Query &query, std::shared_ptr<Client> client) override {
+    void execute(const Query &query, std::shared_ptr<Client> client) override {
         std::string response = GetResponse(query);
-        int fd = client->fd;
-        if (response.empty() || fd < 0)
-            return -1;
+        if (response.empty())
+            return;
 
-        return Server::SendData(fd, response.c_str(), response.size());
+        client->WriteAsync(response);
     }
 };
 
@@ -115,26 +112,24 @@ private:
     }
 
 public:
-    ssize_t execute(const Query &query, std::shared_ptr<Client> client) override {
+    void execute(const Query &query, std::shared_ptr<Client> client) override {
         std::string response = GetResponse(query);
         if (response.empty())
-            return InvalidResponseError;
-        int fd = client->fd;
+            return;
 
-        return Server::SendData(fd, response.c_str(), response.size());
+        client->WriteAsync(response);
     }
 
 };
 
 class PingCommandExecutor : public AbstractInternalCommandExecutor {
-    ssize_t execute(const Query &query, std::shared_ptr<Client> client) override {
+    void execute(const Query &query, std::shared_ptr<Client> client) override {
         if (query.cmd_args.size() < 1)
-            return InvalidCommandError;
+            return;
 
-        int fd = client->fd;
         std::string response = "+PONG\r\n";
 
-        return Server::SendData(fd, response.c_str(), response.size());
+        client->WriteAsync(response);
     }
 };
 
@@ -167,14 +162,10 @@ class GetConfigCommandExecutor : public AbstractInternalCommandExecutor {
     }
 
 public:
-    ssize_t execute(const Query &query, std::shared_ptr<Client> client) override {
+    void execute(const Query &query, std::shared_ptr<Client> client) override {
         std::string response = GetResponse(query);
-        if (response.empty()) {
-            return InvalidResponseError;
-        }
 
-        int fd = client->fd;
-        return Server::SendData(fd, response.c_str(), response.size());
+        client->WriteAsync(response);
     }
 };
 
@@ -199,14 +190,10 @@ private:
     }
 
 public:
-    ssize_t execute(const Query &query, std::shared_ptr<Client> client) override {
+    void execute(const Query &query, std::shared_ptr<Client> client) override {
         std::string response = GetResponse(query);
-        if (response.empty()) {
-            return InvalidResponseError;
-        }
 
-        int fd = client->fd;
-        return Server::SendData(fd, response.c_str(), response.size());
+        client->WriteAsync(response);
     }
 
 };
@@ -232,38 +219,28 @@ private:
     }
 
 public:
-    ssize_t execute(const Query &query, std::shared_ptr<Client> client) override {
+    void execute(const Query &query, std::shared_ptr<Client> client) override {
         std::string response = GetResponse(query);
-        int fd = client->fd;
 
-        if (fd < 0 || response.empty())
-            return InvalidResponseError;
-
-        return Server::SendData(fd, response.c_str(), response.size());
+        client->WriteAsync(response);
     }
 };
 
 class ReplconfCommandExecutor : public AbstractInternalCommandExecutor {
-    ssize_t execute(const Query &query, std::shared_ptr<Client> client) override {
+    void execute(const Query &query, std::shared_ptr<Client> client) override {
         /// TODO: handle the argument
         std::string response = "+OK\r\n";
-        int fd = client->fd;
 
         /// set it become slave server
-        client->is_slave = 1;
-        client->slave_state = SlaveState::WaitBGSaveStart;
+        client->SetClientType(ClientType::TypeSlave);
+        client->SetSlaveState(SlaveState::WaitBGSaveStart);
 
-        return Server::SendData(fd, response.c_str(), response.size());
+        client->WriteAsync(response);
     }
 };
 
 class PSyncCommandExecutor : public AbstractInternalCommandExecutor {
-    ssize_t execute(const Query &query, std::shared_ptr<Client> client) override {
-        int fd = client->fd;
-        if (fd < 0) {
-            LOG_ERROR(TAG, "Invalid fd %d", fd)
-            return InvalidSocketError;
-        }
+    void execute(const Query &query, std::shared_ptr<Client> client) override {
 
         /// if could not perform incremental replication
         /// TODO: handle the argument
@@ -273,9 +250,10 @@ class PSyncCommandExecutor : public AbstractInternalCommandExecutor {
 
         /// Case 1: full sync
         std::string response = EncodeRespSimpleStr("FULLRESYNC " + master_repid + " " + master_repl_offset);
-        Server::SendData(fd, response.c_str(), response.size());
 
-        client->slave_state = SlaveState::WaitBGSaveEnd;
+        client->WriteAsync(response);
+
+        client->SetSlaveState(SlaveState::WaitBGSaveEnd);
 
         /// Parent proc creates a child proc
         /// Snapshot the current database in child process and send it over TCP, notify to the parent when finish
@@ -283,19 +261,19 @@ class PSyncCommandExecutor : public AbstractInternalCommandExecutor {
         /// After received notification from the child (using waitpid()), the parent handles all command in buffer and propagate all write commands to the replicas
         ssize_t ret = Database::GetInstance()->SaveRdbBackground(rdb_file);
 
-        return ret;
+    }
+};
+
+class FullresyncCommandExecutor : public AbstractInternalCommandExecutor {
+    void execute(const Query &query, std::shared_ptr<Client> client) override {
+
     }
 };
 
 class UnknownCommandExecutor : public AbstractInternalCommandExecutor {
-    ssize_t execute(const Query &query, std::shared_ptr<Client> client) override {
-        std::string response = "+OK\r\n";
-        int fd = client->fd;
-
-        if (fd < 0)
-            return InvalidSocketError;
-
-        return Server::SendData(fd, response.c_str(), response.size());
+    void execute(const Query &query, std::shared_ptr<Client> client) override {
+        /// FIXME: handle with unknown command
+        client->WriteAsync(RESP_OK);
     }
 };
 
@@ -320,6 +298,8 @@ AbstractInternalCommandExecutor::createCommandExecutor(const CommandType cmd_typ
             return std::make_shared<ReplconfCommandExecutor>();
         case PSyncCmd:
             return std::make_shared<PSyncCommandExecutor>();
+        case FullresyncCmd:
+            return std::make_shared<FullresyncCommandExecutor>();
         default:
             std::cerr << "Unknown command type: " << cmd_type << std::endl;
             return std::make_shared<UnknownCommandExecutor>();

@@ -36,6 +36,8 @@ public:
 
     static Database *GetInstance();
 
+    int Reset();
+
     int SetConfig(const std::shared_ptr<RedisConfig> &cfg);
 
     std::string GetConfigFromName(const std::string &property);

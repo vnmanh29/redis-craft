@@ -45,10 +45,12 @@ std::string Database::RetrieveValueOfKey(const std::string &key) {
                 std::chrono::system_clock::now().time_since_epoch()).count();
         auto p = table_.at(key);
         if (p->expire_time > 0 && p->expire_time < now) {
-            LOG_INFO(TAG, "Key %s has expired at %lld, now %lld, removing it from the database.\n",
+            LOG_INFO(TAG, "Key %s has expired at %lld, now %lld, removing it from the database",
                      key.c_str(), p->expire_time, now);
             return "";
         }
+
+        LOG_DEBUG(TAG, "Key %s has expired at %lld, now %lld", key.c_str(), p->expire_time, now);
         return p->kv_value;
     }
     catch (std::exception &ex) {
@@ -148,12 +150,7 @@ ssize_t Database::SaveRdbBackground(const std::string &file_name) {
         close(Server::GetInstance()->GetChildInfoReadPipe());
 
         /// save the memory db to the local file
-#if DEBUG
-        char magic[10] = {0};
-        /// version
-        snprintf(magic,sizeof(magic),"REDIS%04d",version_);
-        Server::SendData(fd, magic);
-#else
+#if HARDCODE
         LOG_DEBUG(TAG, "Start save empty rdb");
         std::string hex = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
 
@@ -167,7 +164,13 @@ ssize_t Database::SaveRdbBackground(const std::string &file_name) {
 
         fclose(file);
         LOG_DEBUG(TAG, "Finish save empty rdb")
-#endif // DEBUG
+
+#else
+        char magic[10] = {0};
+        /// version
+        snprintf(magic,sizeof(magic),"REDIS%04d",version_);
+        Server::SendData(fd, magic);
+#endif // HARDCODE
 
         /// TODO: notify to parent end of child proc
         _exit(0);
@@ -194,6 +197,11 @@ std::string Database::GetRdbPath() const {
     }
 
     return "";
+}
+
+int Database::Reset() {
+    table_.clear();
+    return 0;
 }
 
 

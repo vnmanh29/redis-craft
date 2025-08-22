@@ -6,7 +6,7 @@
 #include "Utils.h"
 #include "all.hpp"
 
-std::string EncodeArr2RespArr(std::vector<std::string> &arr) {
+std::string EncodeArr2RespArr(std::vector<std::string> arr) {
     std::string resp_str;
     resp::encoder<std::string> enc;
     auto encoded_arr = enc.encode_arr(arr);
