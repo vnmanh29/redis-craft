@@ -51,6 +51,8 @@ public:
     ssize_t SaveRdbBackground(const std::string &file_name);
 
     [[nodiscard]] std::string GetRdbPath() const;
+
+    int LoadPersistentDb();
 };
 
 

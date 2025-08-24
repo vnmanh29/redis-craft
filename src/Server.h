@@ -63,8 +63,6 @@ typedef struct ReplicationInfo {
     }
 } ReplicationInfo;
 
-#define BUF_SIZE 4096
-
 class Server {
 private:
     static Server *instance_;
@@ -94,9 +92,7 @@ private:
 private:
     Server() = default;
 
-    Server(asio::io_context &io_context) : io_context_(io_context), acceptor_(io_context), replica_socket_(io_context),
-                                           signal_(io_context, SIGCHLD) {
-    }
+    Server(asio::io_context &io_context);
 
     /// only the replica server call this method
     int SyncWithMaster();
@@ -109,7 +105,7 @@ private:
 
     void OnSaveRdbBackgroundDone(const int exitcode);
 
-    ssize_t FullSyncRdbToReplica(const std::shared_ptr<Client> &slave);
+    void FullSyncRdbToReplica(const std::shared_ptr<Client> &slave);
 
     void AddCommand(const std::string &command, CommandType type, uint64_t flag);
 
@@ -128,7 +124,9 @@ public:
     int Setup();
 
     /// start the Redis server, already to listen all command after the preparing
-    int Start();
+    int StartMaster();
+
+    void OnReady();
 
     /// Accept coming connections
     void DoAccept();
@@ -158,6 +156,10 @@ public:
     std::vector<std::shared_ptr<Client>> GetClients() const { return clients_; }
 
     RedisCmd *GetRedisCommand(const std::string &cmd_name);
+
+    int HandleFullResyncReply(const std::string &reply);
+
+    int GetPort() const { return port_; }
 };
 
 

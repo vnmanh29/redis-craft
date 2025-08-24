@@ -8,7 +8,7 @@
 #define ASIO_LIB 1
 #define HARDCODE 1
 
-#define DEBUG 0
+#define ZDEBUG 1
 
 enum struct LogLevel {
     Silent = 0,
@@ -58,7 +58,7 @@ extern const char TAG[];
     }                                                                                               \
 }
 
-#if DEBUG
+#if ZDEBUG
 #define LOG_LINE() { \
     printf("%s:%d:%s\n", __FILE__, __LINE__, __FUNCTION__); \
     fflush(stdout);      \

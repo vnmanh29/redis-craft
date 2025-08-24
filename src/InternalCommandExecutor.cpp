@@ -135,9 +135,15 @@ class PingCommandExecutor : public AbstractInternalCommandExecutor {
 
         std::string response = RESP_PONG;
 
-        SetFlags(CLIENT_REPLY_SUPPORTED | MASTER_REPLY_SUPPORTED);
+        SetFlags(CLIENT_REPLY_SUPPORTED);// | MASTER_REPLY_SUPPORTED);
+//        SetFlags(CLIENT_REPLY_SUPPORTED);
 
-        client->WriteAsync(response);
+//        if (client->ClientType() == ClientType::TypeMaster) {
+//            client->WriteAsync(EncodeArr2RespArr({"REPLCONF", "ACK", "0"}));
+//        }
+//        else {
+            client->WriteAsync(response);
+//        }
     }
 };
 
@@ -329,7 +335,8 @@ class FullresyncCommandExecutor : public AbstractInternalCommandExecutor {
 
 class UnknownCommandExecutor : public AbstractInternalCommandExecutor {
     void execute(const Query &query, std::shared_ptr<Client> client) override {
-        SetFlags(CLIENT_REPLY_SUPPORTED | MASTER_REPLY_SUPPORTED | SLAVE_REPLY_SUPPORTED);
+//        SetFlags(CLIENT_REPLY_SUPPORTED | MASTER_REPLY_SUPPORTED | SLAVE_REPLY_SUPPORTED);
+        SetFlags(CLIENT_REPLY_SUPPORTED);
         /// FIXME: handle with unknown command
         client->WriteAsync(RESP_OK);
     }

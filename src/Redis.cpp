@@ -60,7 +60,7 @@ int main(int argc, char **argv) {
     std::cout << std::unitbuf;
     std::cerr << std::unitbuf;
 
-    set_log_level(LogLevel::Info);
+    set_log_level(LogLevel::Debug);
 
     /// parse the argv
     std::shared_ptr<RedisConfig> cfg = std::make_shared<RedisConfig>();
@@ -77,7 +77,7 @@ int main(int argc, char **argv) {
 
     Server::GetInstance()->Setup();
 
-    Server::GetInstance()->Start();
+    Server::GetInstance()->StartMaster();
 
     return 0;
 }

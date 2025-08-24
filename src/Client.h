@@ -66,11 +66,11 @@ public:
     /// send data from @param pfile stream through tpc:socket
     void WriteStreamFileAsync(std::shared_ptr<std::ifstream> file);
 
-    int ConnectSync(asio::io_context &io_ctx, const std::string &host, const std::string &port);
+    int ConnectAsync(asio::io_context &io_ctx, const std::string &host, const std::string &port);
 
-    int WriteSync(const std::string &s);
+//    int WriteSync(const std::string &s);
 
-    int ReadSyncWithLength(std::string &s, size_t length);
+//    int ReadSyncWithLength(std::string &s, size_t length);
 
     int ReadSyncNewLine(std::string &s);
 
@@ -82,9 +82,7 @@ public:
 
     void SetSlaveState(const int state) { slave_state_ = state; }
 
-    ~Client() {
-        LOG_LINE();
-    }
+    void PropagateRdb(const std::string& rdb_path);
 
 private:
     explicit Client(asio::io_context &io_ctx) : sock_(io_ctx), bulk_(), client_type_(TypeRegular),
@@ -95,19 +93,38 @@ private:
                                                                      client_type_(TypeRegular),
                                                                      slave_state_(SlaveState::SlaveOnline) {}
 
+    void SendPingAsync();
+
+    void ReceivePongAndSendReplConf();
+
+    void PrepareAndSendReplConfCapa();
+
+    void PrepareAndSendPsync();
+
+    void ReceivePsyncReply();
+
+    void ReadRdbFileReply(FILE* f);
+
+    int ReadRdbLengthAndData(FILE* f);
+
 private:
     tcp::socket sock_;
 
-    std::array<char, BUFFER_SIZE> out_buf_;
+    /// beginning position of input buffer.
+    /// With write method, it is the beginning writable position, with read method, it's the beginning readable position
+    size_t in_pos_;
     std::array<char, BUFFER_SIZE> in_buf_;
+    std::vector<char> internal_buffer_;
+    uint64_t rdb_file_size_, rdb_read_size_;
+
+
+    std::array<char, BUFFER_SIZE> out_buf_;
     std::vector<char> bulk_;
 
     CommandExecutor executor_; /// the executor for this client
 
     int client_type_;
     int slave_state_;
-
-
 };
 
 

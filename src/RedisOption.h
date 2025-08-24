@@ -8,6 +8,8 @@
 #include <string>
 #include "Utils.h"
 
+extern int server_port;
+
 typedef struct RedisConfig {
     std::string dir_path;
     std::string dbfilename;

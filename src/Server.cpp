@@ -30,6 +30,15 @@ Server *Server::instance_{nullptr};
 std::mutex Server::m_;
 asio::io_context global_context;
 
+int server_port = DEFAULT_REDIS_PORT;
+
+Server::Server(asio::io_context &io_context) : acceptor_(io_context, tcp::endpoint(tcp::v4(), server_port)),
+                                               port_(server_port),
+                                               io_context_(io_context),
+                                               replica_socket_(io_context),
+                                               signal_(io_context, SIGCHLD) {
+}
+
 Server *Server::GetInstance() {
     std::lock_guard lock(m_);
     if (instance_ == nullptr) {
@@ -44,20 +53,25 @@ Server::~Server() {
     LOG_INFO("Server", "Destructor server instance");
 }
 
-int Server::Start() {
+void Server::OnReady() {
+    LOG_LINE();
     CheckChildrenDone();
-
-    acceptor_ = tcp::acceptor(io_context_, {tcp::v4(), port_});
+    LOG_LINE();
+//    acceptor_ = tcp::acceptor(io_context_, tcp::endpoint(tcp::v4(), port_));
     DoAccept();
-    io_context_.run();
+}
 
+int Server::StartMaster() {
+
+    OnReady();
+    io_context_.run();
     return 0;
 }
 
 void Server::SetConfig(const std::shared_ptr<RedisConfig> &cfg) {
     if (cfg) {
         /// TODO: add more config properties belong to network???
-        port_ = cfg->port;
+//        port_ = cfg->port;
 
         if (cfg->is_replica) {
             replication_info_.role = ReplicationRole::Slave;
@@ -99,7 +113,7 @@ int Server::Setup() {
 
 int Server::SyncWithMaster() {
     if (!replication_info_.is_replica)
-        return 0;
+        return ReplicationRole::Master;
 
     /// blocking operation. This method will block until the RDB file is received from the master
     std::string host = replication_info_.master_host;
@@ -111,98 +125,106 @@ int Server::SyncWithMaster() {
         auto master_server = Client::create(io_context_);
         master_server->SetClientType(ClientType::TypeMaster);
 
-        int ret = master_server->ConnectSync(io_context_, host, port);
+        int ret = master_server->ConnectAsync(io_context_, host, port);
         if (ret < 0) {
             LOG_ERROR(TAG, "Connect to host %s, port %s fail", host.c_str(), port.c_str());
             return SocketConnectError;
         }
 
-        std::vector<char> buf(128);
-        /// Handshake part
 
         LOG_LINE();
-        std::string response;
-        /// 1. PING to master
-        master_server->WriteSync(EncodeArr2RespArr({"PING"}));
-        master_server->ReadSyncWithLength(response, strlen(RESP_PONG));
-        if (strncasecmp(response.data(), RESP_PONG, strlen(RESP_PONG)) != 0) {
-            LOG_ERROR("Handshake", "response of PING: %s, expect %s", response.data(), RESP_PONG);
-            return HandShakeRecvError;
-        }
-
+        io_context_.run();
+//        io_context_.restart();
         LOG_LINE();
-        /// 2. send Replconf to master
-        master_server->WriteSync(EncodeArr2RespArr({"replconf", "listening-port", std::to_string(port_)}));
-        master_server->ReadSyncWithLength(response, strlen(RESP_OK));
-        if (strncasecmp(response.data(), RESP_OK, strlen(RESP_OK)) != 0) {
-            LOG_ERROR("Handshake", "compare %zu bytes response of REPLCONF listening-port: %s, expect %s",
-                      strlen(RESP_OK), response.data(), RESP_OK);
-            return HandShakeRecvError;
-        }
-
-        master_server->WriteSync((EncodeArr2RespArr({"replconf", "capa", "psync2"})));
-        master_server->ReadSyncWithLength(response, strlen(RESP_OK));
-        if (strncasecmp(response.data(), RESP_OK, strlen(RESP_OK)) != 0) {
-            LOG_ERROR("Handshake", "response of REPLCONF capa: %s, expect %s", response.data(), RESP_OK);
-            return HandShakeRecvError;
-        }
-
-        LOG_LINE();
-        /// 3. PSYNC step
-        master_server->WriteSync((EncodeArr2RespArr({"psync", "?", "-1"})));
-
-        /// try to read FULLRESYNC response: read byte by byte util meet '\n'
-        /// FIXME: handle with timeout
-        ret = master_server->ReadSyncNewLine(response);
-        if (ret < 0) {
-            LOG_ERROR(TAG, "read new line from command FULLRESYNC fail");
-            return ret;
-        }
-
-        /// parse 'buf': verify response with token RESP_FULLRESYNC, get master_uid, get offset
-        size_t idx = response.find(' ');
-        if (idx == std::string::npos || response.substr(0, strlen(RESP_FULLRESYNC)) != RESP_FULLRESYNC) {
-            LOG_ERROR(TAG, "Invalid response of PSYNC, not found FULLRESYNC");
-            return HandShakeRecvError;
-        }
-
-        ++idx;
-        size_t idx1 = response.find(' ', idx);
-        if (idx1 == std::string::npos) {
-            LOG_ERROR(TAG, "Invalid master_uid in response of PSYNC");
-            return HandShakeRecvError;
-        }
-
-        replication_info_.master_replid = response.substr(idx, idx1 - idx);
-        replication_info_.master_repl_offset = std::stoll(response.substr(idx1 + 1));
-
-        LOG_LINE();
-        /// 4. Reading file .rdb with async method
-        /// Format of file: $<length_of_file>\r\n<binary_contents_of_file>
-        /// 4.1 read and parse the size of rdb file
-        ret = master_server->ReadSyncNewLine(response);
-        if (ret < 0) {
-            LOG_ERROR(TAG, "read new line to parse the rdb size fail");
-            return SyncReadError;
-        }
-        LOG_LINE();
-        /// 4.2 parse the length
-        if (response.size() <= 1 || response[0] != '$') {
-            LOG_ERROR(TAG, "parse the size of rdb file fail");
-            return InvalidResponseError;
-        }
-
-        LOG_DEBUG("RDB", "response %s", response.c_str());
-        long rdb_filesize = std::stol(response.substr(1));
-        LOG_DEBUG("RDB", "rdb file size %lu", rdb_filesize);
-        ReceiveRdbFromMaster(master_server, rdb_filesize);
-
-        /// TODO: 5. Load rdb file to memory
-
-        return RedisSuccess;
+        return 0;
+//
+//        std::vector<char> buf(128);
+//        /// Handshake part
+//
+//        LOG_LINE();
+//        std::string response;
+//        /// 1. PING to master
+//        master_server->WriteSync(EncodeArr2RespArr({"PING"}));
+//        master_server->ReadSyncWithLength(response, strlen(RESP_PONG));
+//        if (strncasecmp(response.data(), RESP_PONG, strlen(RESP_PONG)) != 0) {
+//            LOG_ERROR("Handshake", "response of PING: %s, expect %s", response.data(), RESP_PONG);
+//            return HandShakeRecvError;
+//        }
+//
+//        LOG_LINE();
+//        /// 2. send Replconf to master
+//        master_server->WriteSync(EncodeArr2RespArr({"replconf", "listening-port", std::to_string(port_)}));
+//        master_server->ReadSyncWithLength(response, strlen(RESP_OK));
+//        if (strncasecmp(response.data(), RESP_OK, strlen(RESP_OK)) != 0) {
+//            LOG_ERROR("Handshake", "compare %zu bytes response of REPLCONF listening-port: %s, expect %s",
+//                      strlen(RESP_OK), response.data(), RESP_OK);
+//            return HandShakeRecvError;
+//        }
+//
+//        master_server->WriteSync((EncodeArr2RespArr({"replconf", "capa", "psync2"})));
+//        master_server->ReadSyncWithLength(response, strlen(RESP_OK));
+//        if (strncasecmp(response.data(), RESP_OK, strlen(RESP_OK)) != 0) {
+//            LOG_ERROR("Handshake", "response of REPLCONF capa: %s, expect %s", response.data(), RESP_OK);
+//            return HandShakeRecvError;
+//        }
+//
+//        LOG_LINE();
+//        /// 3. PSYNC step
+//        master_server->WriteSync((EncodeArr2RespArr({"psync", "?", "-1"})));
+//
+//        /// try to read FULLRESYNC response: read byte by byte util meet '\n'
+//        /// FIXME: handle with timeout
+//        ret = master_server->ReadSyncNewLine(response);
+//        if (ret < 0) {
+//            LOG_ERROR(TAG, "read new line from command FULLRESYNC fail");
+//            return ret;
+//        }
+//
+//        /// parse 'buf': verify response with token RESP_FULLRESYNC, get master_uid, get offset
+//        size_t idx = response.find(' ');
+//        if (idx == std::string::npos || response.substr(0, strlen(RESP_FULLRESYNC)) != RESP_FULLRESYNC) {
+//            LOG_ERROR(TAG, "Invalid response of PSYNC, not found FULLRESYNC");
+//            return HandShakeRecvError;
+//        }
+//
+//        ++idx;
+//        size_t idx1 = response.find(' ', idx);
+//        if (idx1 == std::string::npos) {
+//            LOG_ERROR(TAG, "Invalid master_uid in response of PSYNC");
+//            return HandShakeRecvError;
+//        }
+//
+//        replication_info_.master_replid = response.substr(idx, idx1 - idx);
+//        replication_info_.master_repl_offset = std::stoll(response.substr(idx1 + 1));
+//
+//        LOG_LINE();
+//        /// 4. Reading file .rdb with async method
+//        /// Format of file: $<length_of_file>\r\n<binary_contents_of_file>
+//        /// 4.1 read and parse the size of rdb file
+//        ret = master_server->ReadSyncNewLine(response);
+//        if (ret < 0) {
+//            LOG_ERROR(TAG, "read new line to parse the rdb size fail");
+//            return SyncReadError;
+//        }
+//        LOG_LINE();
+//        /// 4.2 parse the length
+//        if (response.size() <= 1 || response[0] != '$') {
+//            LOG_ERROR(TAG, "parse the size of rdb file fail");
+//            return InvalidResponseError;
+//        }
+//
+//        LOG_DEBUG("RDB", "response %s", response.c_str());
+//        long rdb_filesize = std::stol(response.substr(1));
+//        LOG_DEBUG("RDB", "rdb file size %lu", rdb_filesize);
+//        ReceiveRdbFromMaster(master_server, rdb_filesize);
+//
+//        /// TODO: 5. Load rdb file to memory
+//
+//        return RedisSuccess;
 
     } catch (const asio::system_error &e) {
-        LOG_ERROR("Asio", "Connect to host %s, port %s fail %d", host.c_str(), port.c_str(), e.code().value());
+        LOG_ERROR("Asio", "Connect to host %s, port %s fail %d: %s", host.c_str(), port.c_str(), e.code().value(),
+                  e.what());
         return UnknownError;
     }
 }
@@ -233,6 +255,7 @@ void Server::CheckChildrenDone() {
     signal_.async_wait(
             [this](const std::error_code error, const int signal) {
                 // validate the parent proc
+                LOG_LINE();
                 if (acceptor_.is_open()) {
                     LOG_LINE();
                     int status = 0;
@@ -266,6 +289,7 @@ void Server::CheckChildrenDone() {
                     LOG_LINE();
                 }
             });
+    LOG_LINE();
 }
 
 void Server::OnSaveRdbBackgroundDone(const int exitcode) {
@@ -277,7 +301,7 @@ void Server::OnSaveRdbBackgroundDone(const int exitcode) {
             LOG_ERROR(TAG, "Try to propagate rdb to client sock %d, client type %u", client->Socket().native_handle(),
                       client->ClientType());
             if (client->ClientType() == TypeSlave && client->SlaveState() == SlaveState::WaitBGSaveEnd) {
-                ssize_t total_sent = FullSyncRdbToReplica(client);
+                FullSyncRdbToReplica(client);
                 /// FIXME: handle when sent partially
             }
         }
@@ -285,34 +309,10 @@ void Server::OnSaveRdbBackgroundDone(const int exitcode) {
     LOG_LINE()
 }
 
-ssize_t Server::FullSyncRdbToReplica(const std::shared_ptr<Client> &slave) {
+void Server::FullSyncRdbToReplica(const std::shared_ptr<Client> &slave) {
     std::string rdb_file_path = Database::GetInstance()->GetRdbPath();
-    char prefix_rdb[20] = {0};
-    ssize_t rdb_size = 0, total_sent = 0;
 
-    LOG_DEBUG(TAG, "start sending replica prefix through fd %d", slave->Socket().native_handle());
-    struct stat st;
-    if (RdbStat(rdb_file_path, st) < 0) {
-        std::cerr << "Stat() file " << rdb_file_path << "error " << strerror(errno) << std::endl;
-        return 0;
-    } else {
-        rdb_size = st.st_size;
-    }
-
-    snprintf(prefix_rdb, 19, "$%lld\r\n", rdb_size);
-
-    /** send data */
-    ///  First, send the length of rdb
-    slave->WriteSync(prefix_rdb);
-
-    /// Second, read and send binary rdb
-    /// because MACOSX does not support ASIO_HAS_IO_URING, so we use normal blocking file read/write
-    std::shared_ptr<std::ifstream> pfile = std::make_shared<std::ifstream>(rdb_file_path);
-
-    slave->WriteStreamFileAsync(pfile);
-    LOG_LINE();
-
-    return total_sent;
+    slave->PropagateRdb(rdb_file_path);;
 }
 
 RedisCmd *Server::GetRedisCommand(const std::string &cmd_name) {
@@ -391,7 +391,7 @@ int Server::ReceiveRdbFromMaster(std::shared_ptr<Client> master_server, const lo
 }
 
 void Server::DoAccept() {
-    LOG_DEBUG(TAG, "wait new connection ...");
+    LOG_INFO(TAG, "Wait new connection ...");
     acceptor_.async_accept([this](const std::error_code &error, tcp::socket socket) {
         if (!error) {
             auto client = Client::CreateBindSocket(io_context_, std::move(socket));
@@ -399,8 +399,36 @@ void Server::DoAccept() {
                      client->Socket().native_handle());
             clients_.push_back(client);
             client->ReadAsync();
+        } else {
+            LOG_ERROR("Asio", "Accept new connection fail %s", error.message().c_str());
         }
 
         DoAccept();
     });
+    LOG_LINE();
+}
+
+int Server::HandleFullResyncReply(const std::string &reply) {
+
+    /// parse 'buf': verify response with token RESP_FULLRESYNC, get master_uid, get offset
+    size_t idx = reply.find(' ');
+    if (idx == std::string::npos || reply.substr(0, strlen(RESP_FULLRESYNC)) != RESP_FULLRESYNC) {
+        LOG_ERROR("HandShake", "Invalid response of PSYNC, not found FULLRESYNC");
+        return HandShakeRecvError;
+    }
+    LOG_LINE();
+
+    ++idx;
+    size_t idx1 = reply.find(' ', idx);
+    if (idx1 == std::string::npos) {
+        LOG_ERROR(TAG, "Invalid master_uid in response of PSYNC");
+        return HandShakeRecvError;
+    }
+
+    LOG_LINE();
+
+    replication_info_.master_replid = reply.substr(idx, idx1 - idx);
+    replication_info_.master_repl_offset = std::stoll(reply.substr(idx1 + 1));
+
+    return 0;
 }

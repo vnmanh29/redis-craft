@@ -204,4 +204,21 @@ int Database::Reset() {
     return 0;
 }
 
+int Database::LoadPersistentDb() {
+
+    /// 1. open rdb file
+    std::string rdb_file = GetRdbPath();
+    if (rdb_file.empty()) {
+        LOG_ERROR("DB", "Empty rdb file path");
+        return -1;
+    }
+
+    std::ifstream ifs(rdb_file);
+
+    /// 2. reset current db
+    Reset();
+
+    /// 3. TODO: load data to memory
+    return 0;
+}
 

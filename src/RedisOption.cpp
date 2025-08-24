@@ -30,6 +30,7 @@ static int opt_port(RedisConfig *redis_cfg, const char *arg) {
     if (redis_cfg) {
         try {
             redis_cfg->port = std::stoi(arg);
+            server_port = redis_cfg->port;
             return 0;
         }
         catch (const std::exception &e) {
