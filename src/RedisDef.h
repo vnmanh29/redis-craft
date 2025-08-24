@@ -22,6 +22,7 @@ enum struct LogLevel {
 
 #define RESP_PONG "+PONG\r\n"
 #define RESP_OK "+OK\r\n"
+#define RESP_NIL "$-1\r\n"
 #define RESP_FULLRESYNC "+FULLRESYNC"
 
 extern LogLevel global_log_level;

@@ -15,13 +15,15 @@ class EchoCommandExecutor : public AbstractInternalCommandExecutor {
 
         std::string response = enc.encode_bulk_str(query.cmd_args[1], query.cmd_args[1].size());
 
+        SetFlags(CLIENT_REPLY_SUPPORTED);
+
         client->WriteAsync(response);
     }
 };
 
 class GetCommandExecutor : public AbstractInternalCommandExecutor {
 private:
-    static std::string GetResponse(const Query &query) {
+    std::string GetResponse(const Query &query) {
         std::string response;
 
         if (query.cmd_args.size() < 2) {
@@ -46,6 +48,8 @@ private:
         std::string response = GetResponse(query);
         if (response.empty())
             return;
+
+        SetFlags(CLIENT_REPLY_SUPPORTED);
 
         client->WriteAsync(response);
     }
@@ -117,6 +121,8 @@ public:
         if (response.empty())
             return;
 
+        SetFlags(CLIENT_REPLY_SUPPORTED);
+
         client->WriteAsync(response);
     }
 
@@ -127,7 +133,9 @@ class PingCommandExecutor : public AbstractInternalCommandExecutor {
         if (query.cmd_args.size() < 1)
             return;
 
-        std::string response = "+PONG\r\n";
+        std::string response = RESP_PONG;
+
+        SetFlags(CLIENT_REPLY_SUPPORTED | MASTER_REPLY_SUPPORTED);
 
         client->WriteAsync(response);
     }
@@ -165,6 +173,8 @@ public:
     void execute(const Query &query, std::shared_ptr<Client> client) override {
         std::string response = GetResponse(query);
 
+        SetFlags(CLIENT_REPLY_SUPPORTED);
+
         client->WriteAsync(response);
     }
 };
@@ -192,6 +202,8 @@ private:
 public:
     void execute(const Query &query, std::shared_ptr<Client> client) override {
         std::string response = GetResponse(query);
+
+        SetFlags(CLIENT_REPLY_SUPPORTED);
 
         client->WriteAsync(response);
     }
@@ -222,18 +234,61 @@ public:
     void execute(const Query &query, std::shared_ptr<Client> client) override {
         std::string response = GetResponse(query);
 
+        SetFlags(CLIENT_REPLY_SUPPORTED);
+
         client->WriteAsync(response);
     }
 };
 
 class ReplconfCommandExecutor : public AbstractInternalCommandExecutor {
+private:
+    std::string GetResponse(const Query &query, std::shared_ptr<Client> client) {
+        LOG_LINE();
+        std::string reply = RESP_OK;
+
+        if (query.cmd_args.empty()) {
+            return RESP_NIL;
+        } else if (query.cmd_args.size() == 1) {
+            return RESP_OK;
+        } else {
+            std::string arg1 = query.cmd_args[1];
+            std::string arg2 = query.cmd_args[2];
+            std::transform(arg1.begin(), arg1.end(), arg1.begin(), ::toupper);
+            if (arg1 == "GETACK") { /// from master send to slave
+                /// set it is master server
+                client->SetClientType(ClientType::TypeMaster);
+
+                SetFlags(MASTER_REPLY_SUPPORTED);
+
+                reply = EncodeArr2RespArr({"REPLCONF", "ACK", "0"});
+
+                LOG_DEBUG("REPL", "reply %s", reply.c_str());
+            } else if (arg1 == "LISTENING-PORT") { /// send from slave to master for psync cmd
+                /// set it become slave server
+                client->SetClientType(ClientType::TypeSlave);
+                client->SetSlaveState(SlaveState::WaitBGSaveStart);
+
+                SetFlags(SLAVE_REPLY_SUPPORTED);
+
+                /// TODO: handle arg2
+                reply = RESP_OK;
+            } else if (arg1 == "CAPA") { /// send from slave to master for psync
+                /// set it become slave server
+                client->SetClientType(ClientType::TypeSlave);
+                client->SetSlaveState(SlaveState::WaitBGSaveStart);
+
+                SetFlags(SLAVE_REPLY_SUPPORTED);
+                /// TODO: handle arg2
+                reply = RESP_OK;
+            }
+        }
+        return reply;
+    }
+
+public:
     void execute(const Query &query, std::shared_ptr<Client> client) override {
         /// TODO: handle the argument
-        std::string response = "+OK\r\n";
-
-        /// set it become slave server
-        client->SetClientType(ClientType::TypeSlave);
-        client->SetSlaveState(SlaveState::WaitBGSaveStart);
+        std::string response = GetResponse(query, client);
 
         client->WriteAsync(response);
     }
@@ -248,6 +303,9 @@ class PSyncCommandExecutor : public AbstractInternalCommandExecutor {
         std::string master_repl_offset = std::to_string(Server::GetInstance()->GetReplicationInfo().master_repl_offset);
         std::string rdb_file = Database::GetInstance()->GetRdbPath();
 
+        /// psync command supports responds to slave
+        SetFlags(SLAVE_REPLY_SUPPORTED);
+
         /// Case 1: full sync
         std::string response = EncodeRespSimpleStr("FULLRESYNC " + master_repid + " " + master_repl_offset);
 
@@ -260,7 +318,6 @@ class PSyncCommandExecutor : public AbstractInternalCommandExecutor {
         /// The parent set Redis to SAVE_DB_MODE, buffering all received commands.
         /// After received notification from the child (using waitpid()), the parent handles all command in buffer and propagate all write commands to the replicas
         ssize_t ret = Database::GetInstance()->SaveRdbBackground(rdb_file);
-
     }
 };
 
@@ -272,6 +329,7 @@ class FullresyncCommandExecutor : public AbstractInternalCommandExecutor {
 
 class UnknownCommandExecutor : public AbstractInternalCommandExecutor {
     void execute(const Query &query, std::shared_ptr<Client> client) override {
+        SetFlags(CLIENT_REPLY_SUPPORTED | MASTER_REPLY_SUPPORTED | SLAVE_REPLY_SUPPORTED);
         /// FIXME: handle with unknown command
         client->WriteAsync(RESP_OK);
     }

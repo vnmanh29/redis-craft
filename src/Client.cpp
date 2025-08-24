@@ -29,12 +29,10 @@ void Client::ReadAsync() {
 }
 
 void Client::WriteAsync(const std::string &reply) {
-    LOG_DEBUG("Client", "write reply %s, sock %d, client type %d", reply.c_str(), sock_.native_handle(), client_type_);
     /// no need to reply to master server
     /// FIXME: more details
-    if (client_type_ == ClientType::TypeMaster)
+    if (!(client_type_ & executor_.Flags()))
         return;
-
     sock_.async_write_some(asio::buffer(reply), [&](const std::error_code &error, const size_t byte_transferred) {
         if (error) {
             LOG_ERROR(TAG, "Send reply %s fail %d: %s", reply.c_str(), error.value(), error.message().c_str());
@@ -55,8 +53,8 @@ void Client::ReadBulkAsyncWriteFile(const size_t total_size, size_t current_read
                               if (!error) {
                                   bulk_.insert(bulk_.end(), in_buf_.begin(), in_buf_.begin() + byte_transferred);
                                   size_t read_bytes = current_read + byte_transferred;
-                                  LOG_DEBUG("Client", "bulk.size %d, read_bytes %d, total size %d", bulk_.size(),
-                                            read_bytes, total_size);
+                                  LOG_DEBUG("Client", "bulk.size %d, read_bytes %d, total size %d, sock %d", bulk_.size(),
+                                            read_bytes, total_size, sock_.native_handle());
                                   if (bulk_.size() >= BULK_SIZE || read_bytes >= total_size) {
                                       LOG_DEBUG(TAG, "write %lu bytes, current_read %lu", byte_transferred,
                                                 read_bytes);

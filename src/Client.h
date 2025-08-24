@@ -23,10 +23,14 @@ enum SlaveState {
     WaitBGSaveEnd = 2,
 };
 
+#define CLIENT_REPLY_SUPPORTED (1<<0)
+#define MASTER_REPLY_SUPPORTED (1<<1)
+#define SLAVE_REPLY_SUPPORTED (1<<2)
+
 enum ClientType {
-    TypeRegular = 0,
-    TypeMaster = 1,
-    TypeSlave = 2,
+    TypeRegular = (1<<0),
+    TypeMaster = (1<<1),
+    TypeSlave = (1<<2),
 };
 
 class Client : public std::enable_shared_from_this<Client> {
@@ -40,6 +44,10 @@ public:
 
     static pClient CreateBindSocket(asio::io_context &io_ctx, tcp::socket &&socket) {
         return pClient(new Client(io_ctx, socket));
+    }
+
+    ~Client() {
+        LOG_LINE();
     }
 
     tcp::socket &Socket() {

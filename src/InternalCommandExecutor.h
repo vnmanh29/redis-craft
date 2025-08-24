@@ -18,10 +18,10 @@ class Client;
 
 class AbstractInternalCommandExecutor : public std::enable_shared_from_this<AbstractInternalCommandExecutor> {
 private:
-    int fd_;
+    int flags_;
 
 public:
-    AbstractInternalCommandExecutor() : fd_(-1) {};
+    AbstractInternalCommandExecutor() : flags_(0) {};
 
     virtual ~AbstractInternalCommandExecutor() = default;
 
@@ -29,12 +29,12 @@ public:
 
     static std::shared_ptr<AbstractInternalCommandExecutor> createCommandExecutor(CommandType cmd_type);
 
-    inline void SetSocket(const int fd) {
-        fd_ = fd;
+    inline void SetFlags(const int flags) {
+        flags_ |= flags;
     }
 
-    inline int GetSocket() const {
-        return fd_;
+    inline int GetFlags() const {
+        return flags_;
     }
 
 };
