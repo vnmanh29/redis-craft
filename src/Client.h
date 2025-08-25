@@ -28,9 +28,9 @@ enum SlaveState {
 #define SLAVE_REPLY_SUPPORTED (1<<2)
 
 enum ClientType {
-    TypeRegular = (1<<0),
-    TypeMaster = (1<<1),
-    TypeSlave = (1<<2),
+    TypeRegular = (1 << 0),
+    TypeMaster = (1 << 1),
+    TypeSlave = (1 << 2),
 };
 
 class Client : public std::enable_shared_from_this<Client> {
@@ -64,15 +64,9 @@ public:
     void ReadBulkAsyncWriteFile(size_t total_size, size_t current_read, FILE *pfile);
 
     /// send data from @param pfile stream through tpc:socket
-    void WriteStreamFileAsync(std::shared_ptr<std::ifstream> file);
+    void WriteStreamFileAsync();
 
     int ConnectAsync(asio::io_context &io_ctx, const std::string &host, const std::string &port);
-
-//    int WriteSync(const std::string &s);
-
-//    int ReadSyncWithLength(std::string &s, size_t length);
-
-    int ReadSyncNewLine(std::string &s);
 
     int ClientType() const { return client_type_; }
 
@@ -82,17 +76,28 @@ public:
 
     void SetSlaveState(const int state) { slave_state_ = state; }
 
-    void PropagateRdb(const std::string& rdb_path);
+    void PropagateRdb(const std::string &rdb_path);
 
 private:
-    explicit Client(asio::io_context &io_ctx) : sock_(io_ctx), bulk_(), client_type_(TypeRegular),
-                                                slave_state_(SlaveState::SlaveOnline) {
+    explicit Client(asio::io_context &io_ctx) : io_context_(io_ctx), sock_(io_ctx), bulk_(), client_type_(TypeRegular),
+                                                slave_state_(SlaveState::SlaveOnline), file_(io_ctx),
+                                                received_fullresync_(false), start_pos_(0), rdb_file_size_(0),
+                                                rdb_read_size_(0), rdb_written_size_(0) {
+        filename_ = get_rdb_file_path();
     }
 
-    explicit Client(asio::io_context &io_ctx, tcp::socket &socket) : sock_(std::move(socket)), bulk_(),
+    explicit Client(asio::io_context &io_ctx, tcp::socket &socket) : io_context_(io_ctx), sock_(std::move(socket)),
+                                                                     bulk_(),
                                                                      client_type_(TypeRegular),
-                                                                     slave_state_(SlaveState::SlaveOnline) {}
+                                                                     slave_state_(SlaveState::SlaveOnline),
+                                                                     file_(io_ctx), file_opened_(0),
+                                                                     received_fullresync_(false), start_pos_(0),
+                                                                     rdb_file_size_(0), rdb_read_size_(0),
+                                                                     rdb_written_size_(0) {
+        filename_ = get_rdb_file_path();
+    }
 
+    /// Handshake methods
     void SendPingAsync();
 
     void ReceivePongAndSendReplConf();
@@ -103,22 +108,42 @@ private:
 
     void ReceivePsyncReply();
 
-    void ReadRdbFileReply(FILE* f);
+    int GetFullResync();
 
-    int ReadRdbLengthAndData(FILE* f);
+    int GetRdbFileSize();
+
+    int TryWriteRdb();
+
+    /// I/O file APIs
+    void OpenFile();
+
+    void FlushBuffer2File(size_t bytes);
+
+    void ReadFile2Buffer();
+
+    void CloseFile();
 
 private:
+    asio::io_context &io_context_;
     tcp::socket sock_;
 
     /// beginning position of input buffer.
     /// With write method, it is the beginning writable position, with read method, it's the beginning readable position
     size_t in_pos_;
     std::array<char, BUFFER_SIZE> in_buf_;
+
     std::vector<char> internal_buffer_;
-    uint64_t rdb_file_size_, rdb_read_size_;
+    size_t start_pos_; /// starting position of internal_buffer_
 
+    bool received_fullresync_;
+    uint64_t rdb_file_size_, rdb_read_size_, rdb_written_size_;
 
-    std::array<char, BUFFER_SIZE> out_buf_;
+    std::string filename_;
+    int file_opened_;
+    asio::posix::stream_descriptor file_; /// using async read/write to regular file
+    int fd_;
+
+    std::array<char, BULK_SIZE> out_buf_;
     std::vector<char> bulk_;
 
     CommandExecutor executor_; /// the executor for this client

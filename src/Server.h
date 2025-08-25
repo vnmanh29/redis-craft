@@ -126,12 +126,14 @@ public:
     /// start the Redis server, already to listen all command after the preparing
     int StartMaster();
 
+    int StartReplica();
+
     void OnReady();
 
     /// Accept coming connections
     void DoAccept();
 
-    void SetConfig(const std::shared_ptr<RedisConfig> &cfg);
+    void SetConfig(RedisConfig* cfg);
 
     void SetReplicaState(const ReplicationState state) { replication_info_.replica_state = state; }
 
@@ -160,6 +162,8 @@ public:
     int HandleFullResyncReply(const std::string &reply);
 
     int GetPort() const { return port_; }
+
+    ssize_t SaveRdbBackground(const std::string &file_name);
 };
 
 

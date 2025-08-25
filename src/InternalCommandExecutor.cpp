@@ -323,7 +323,7 @@ class PSyncCommandExecutor : public AbstractInternalCommandExecutor {
         /// Snapshot the current database in child process and send it over TCP, notify to the parent when finish
         /// The parent set Redis to SAVE_DB_MODE, buffering all received commands.
         /// After received notification from the child (using waitpid()), the parent handles all command in buffer and propagate all write commands to the replicas
-        ssize_t ret = Database::GetInstance()->SaveRdbBackground(rdb_file);
+        ssize_t ret = Server::GetInstance()->SaveRdbBackground(rdb_file);
     }
 };
 

@@ -62,4 +62,6 @@ std::string HexToBinary(const std::string &hexStr);
 
 void hexToBinaryData(const std::string &hexStr, std::vector<unsigned char> &binaryData);
 
+void showBinFile(const std::string& filename);
+
 #endif //REDIS_STARTER_CPP_UTILS_H

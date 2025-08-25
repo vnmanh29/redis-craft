@@ -6,7 +6,7 @@
 #include "Server.h"
 
 void Client::ReadAsync() {
-    LOG_LINE();
+    LOG_DEBUG("Client", "Wait read data from client sock %d, is open %d", sock_.native_handle(), sock_.is_open());
     auto self(shared_from_this());
     sock_.async_read_some(asio::buffer(in_buf_),
                           [this, self](const std::error_code &error, const size_t byte_transferred) {
@@ -24,7 +24,8 @@ void Client::ReadAsync() {
                                   /// FIXME: handle this case
                                   LOG_ERROR(TAG, "Peer was closed, socket %d", sock_.native_handle());
                               } else {
-                                  LOG_ERROR(TAG, "error receive data %s on sock %d", error.message().c_str(), sock_.native_handle());
+                                  LOG_ERROR(TAG, "error receive data %s on sock %d", error.message().c_str(),
+                                            sock_.native_handle());
                                   /// FIXME: handle other error
                               }
                           });
@@ -50,7 +51,6 @@ void Client::WriteAsync(const std::string &reply) {
 
 void Client::ReadBulkAsyncWriteFile(const size_t total_size, size_t current_read, FILE *pfile) {
     LOG_DEBUG("Client", "current %lu, total %lu from sock %d", current_read, total_size, sock_.native_handle());
-    LOG_LINE();
     auto self(shared_from_this());
     sock_.async_read_some(asio::buffer(in_buf_),
                           [total_size, current_read, this, self, pfile](const std::error_code &error,
@@ -110,8 +110,6 @@ int Client::ConnectAsync(asio::io_context &io_ctx, const std::string &host, cons
                           endpoint.port());
                 /// ping to master
                 SendPingAsync();
-            } else {
-                Server::GetInstance()->OnReady();
             }
         });
 
@@ -124,76 +122,34 @@ int Client::ConnectAsync(asio::io_context &io_ctx, const std::string &host, cons
     }
 }
 
-//int Client::WriteSync(const std::string &s) {
-//    try {
-//        LOG_DEBUG("Client", "write to socket: %s", s.c_str());
-//        return sock_.write_some(asio::buffer(s));
-//    }
-//    catch (std::exception &ex) {
-//        LOG_ERROR("Asio", "write sync msg %s fail", s.c_str());
-//        return SyncWriteError;
-//    }
-//}
-
-//int Client::ReadSyncWithLength(std::string &s, const size_t length) {
-//    try {
-////        asio::read(sock_, asio::buffer(in_buf_, length));
-//        sock_.read_some(asio::buffer(in_buf_, length));
-//        s = std::move(std::string(in_buf_.begin(), in_buf_.begin() + length));
-//        LOG_DEBUG("Client", "read from socket: %s", s.c_str());
-//        return RedisSuccess;
-//    }
-//    catch (std::exception &ex) {
-//        LOG_ERROR("Asio", "Read with max length %lu fail %s", length, ex.what());
-//        return SyncReadError;
-//    }
-//}
-
-int Client::ReadSyncNewLine(std::string &response) {
-    try {
-        size_t read_bytes = 0;
-        response = std::string(1, '\0');
-        while (read_bytes < 256) {
-            std::vector<char> c(1);
-            int len = asio::read(sock_, asio::buffer(c));
-            if (c[0] == '\n') {
-                break;
-            } else {
-                response.back() = c[0];
-                response.push_back('\0');
-                read_bytes += len;
-            }
-        }
-
-        return read_bytes;
+void Client::WriteStreamFileAsync() {
+    if (!file_opened_) {
+        OpenFile();
     }
-    catch (std::exception &ex) {
-        LOG_ERROR(TAG, "throw ex %s", ex.what());
-        return SyncReadError;
-    }
-}
 
-void Client::WriteStreamFileAsync(std::shared_ptr<std::ifstream> file) {
-    long read_size = file->read(&out_buf_[0], 4096).gcount();
-    LOG_DEBUG(TAG, "Read %lu bytes from file, eof %d", read_size, file->eof());
+    size_t read_size = read(fd_, out_buf_.data(), BULK_SIZE);
+    if (read_size <= 0) {
+        LOG_INFO("Client", "End of sending file %s", filename_.c_str());
+        slave_state_ = SlaveState::SlaveOnline;
+        CloseFile();
+        return;
+    } else {
+        LOG_DEBUG(TAG, "Read %lu bytes from file %s", read_size, filename_.c_str());
+#if ZDEBUG
+        LOG_DEBUG(TAG, "Hexdata:");
+        showBinFile(filename_);
+        printf("\n");
+        fflush(stdout);
+#endif // ZDEBUG
+    }
+
     auto self(shared_from_this());
     sock_.async_write_some(asio::buffer(out_buf_, read_size),
-                           [file, this, self](const std::error_code &error, const int transferred) {
+                           [this, self](const std::error_code &error, const int transferred) {
                                if (!error) {
                                    LOG_DEBUG(TAG, "Write %d bytes to socket %d", transferred, sock_.native_handle());
-                                   if (file->eof() || file->bad() || file->fail()) {
-                                       LOG_ERROR("File", "End of reading file");
-                                       slave_state_ = SlaveState::SlaveOnline;
-                                       file->close();
-                                   } else {
-                                       WriteStreamFileAsync(file);
-                                   }
+                                   WriteStreamFileAsync();
                                } else {
-                                   if (error == asio::error::eof) {
-                                       LOG_INFO(TAG, "End of file");
-                                       slave_state_ = SlaveState::SlaveOnline;
-                                   }
-                                   file->close();
                                    LOG_ERROR(TAG, "Error reading from file: %s", error.message().c_str());
                                }
                            });
@@ -218,275 +174,255 @@ void Client::SendPingAsync() {
 void Client::ReceivePongAndSendReplConf() {
     LOG_DEBUG("HandShake", "Start handshake replica config");
     auto self(shared_from_this());
-    sock_.async_read_some(asio::buffer(in_buf_), [this, self](const std::error_code &ec, const size_t byte_transferred) {
-        if (!ec) {
-            LOG_DEBUG("HandShake", "Read %s from sock %d", std::string(in_buf_.data(), byte_transferred).c_str(),
-                      sock_.native_handle());
-            if (std::string(in_buf_.data(), byte_transferred) != RESP_PONG) {
-                /// FIXME: handle the received response
-            } else {
-                auto port = Server::GetInstance()->GetPort();
-                LOG_DEBUG("HandShake", "Start send listening-port %d", port);
-                sock_.async_write_some(
-                        asio::buffer(EncodeArr2RespArr({"replconf", "listening-port",
-                                                        std::to_string(port)})),
-                        [this, self](const std::error_code &e, const size_t byte_transferred) {
-                            if (!e) {
-                                LOG_DEBUG("HandShake", "Finish sending replconf, listen port %d through socket %d",
-                                          sock_.local_endpoint().port(), sock_.native_handle());
-                                PrepareAndSendReplConfCapa();
-                            } else {
-                                LOG_ERROR("HandShake", "error %s while send replconf", e.message().c_str());
-                                /// FIXME: handle the error
-                            }
-                        });
-            }
-        } else {
-            LOG_ERROR("HandShake", "Error %s while receive PONG", ec.message().c_str());
-            /// FIXME: handle the error
-        }
-    });
+    sock_.async_read_some(asio::buffer(in_buf_),
+                          [this, self](const std::error_code &ec, const size_t byte_transferred) {
+                              if (!ec) {
+                                  LOG_DEBUG("HandShake", "Read %s from sock %d",
+                                            std::string(in_buf_.data(), byte_transferred).c_str(),
+                                            sock_.native_handle());
+                                  if (std::string(in_buf_.data(), byte_transferred) != RESP_PONG) {
+                                      /// FIXME: handle the received response
+                                  } else {
+                                      auto port = Server::GetInstance()->GetPort();
+                                      LOG_DEBUG("HandShake", "Start send listening-port %d", port);
+                                      sock_.async_write_some(
+                                              asio::buffer(EncodeArr2RespArr({"replconf", "listening-port",
+                                                                              std::to_string(port)})),
+                                              [this, self](const std::error_code &e, const size_t byte_transferred) {
+                                                  if (!e) {
+                                                      LOG_DEBUG("HandShake",
+                                                                "Finish sending replconf, listen port %d through socket %d",
+                                                                sock_.local_endpoint().port(), sock_.native_handle());
+                                                      PrepareAndSendReplConfCapa();
+                                                  } else {
+                                                      LOG_ERROR("HandShake", "error %s while send replconf",
+                                                                e.message().c_str());
+                                                      /// FIXME: handle the error
+                                                  }
+                                              });
+                                  }
+                              } else {
+                                  LOG_ERROR("HandShake", "Error %s while receive PONG", ec.message().c_str());
+                                  /// FIXME: handle the error
+                              }
+                          });
 }
 
 void Client::PrepareAndSendReplConfCapa() {
     auto self(shared_from_this());
-    sock_.async_read_some(asio::buffer(in_buf_), [self, this](const std::error_code &ec, const size_t byte_transferred) {
-        if (!ec) {
-            LOG_DEBUG("HandShake", "Read %s from sock %d", std::string(in_buf_.data(), byte_transferred).c_str(),
-                      sock_.native_handle());
-            if (std::string(in_buf_.data(), byte_transferred) != RESP_OK) {
-                /// FIXME: handle the received response
-            } else {
-                sock_.async_write_some(
-                        asio::buffer(EncodeArr2RespArr({"replconf", "capa", "psync2"})),
-                        [self, this](const std::error_code &e, const size_t byte_transferred) {
-                            if (!e) {
-                                LOG_DEBUG("HandShake", "Finish sending replconf capa psync2");
-                                PrepareAndSendPsync();
-                            } else {
-                                LOG_ERROR("HandShake", "error %s while send replconf", e.message().c_str());
-                                /// FIXME: handle the error
-                            }
-                        });
-            }
-        } else {
-            LOG_ERROR("HandShake", "Error %s while receive response of replconf", ec.message().c_str());
-            /// FIXME: handle the error
-        }
-    });
+    sock_.async_read_some(asio::buffer(in_buf_),
+                          [self, this](const std::error_code &ec, const size_t byte_transferred) {
+                              if (!ec) {
+                                  LOG_DEBUG("HandShake", "Read %s from sock %d",
+                                            std::string(in_buf_.data(), byte_transferred).c_str(),
+                                            sock_.native_handle());
+                                  if (std::string(in_buf_.data(), byte_transferred) != RESP_OK) {
+                                      /// FIXME: handle the received response
+                                  } else {
+                                      sock_.async_write_some(
+                                              asio::buffer(EncodeArr2RespArr({"replconf", "capa", "psync2"})),
+                                              [self, this](const std::error_code &e, const size_t byte_transferred) {
+                                                  if (!e) {
+                                                      LOG_DEBUG("HandShake", "Finish sending replconf capa psync2");
+                                                      PrepareAndSendPsync();
+                                                  } else {
+                                                      LOG_ERROR("HandShake", "error %s while send replconf",
+                                                                e.message().c_str());
+                                                      /// FIXME: handle the error
+                                                  }
+                                              });
+                                  }
+                              } else {
+                                  LOG_ERROR("HandShake", "Error %s while receive response of replconf",
+                                            ec.message().c_str());
+                                  /// FIXME: handle the error
+                              }
+                          });
 
 }
 
 void Client::PrepareAndSendPsync() {
     auto self(shared_from_this());
-    sock_.async_read_some(asio::buffer(in_buf_), [self, this](const std::error_code &ec, const size_t byte_transferred) {
-        if (!ec) {
-            LOG_DEBUG("HandShake", "Read %s from sock %d", std::string(in_buf_.data(), byte_transferred).c_str(),
-                      sock_.native_handle());
-            if (std::string(in_buf_.data(), byte_transferred) != RESP_OK) {
-                /// FIXME: handle the received response
-            } else {
-                sock_.async_write_some(
-                        /// FIXME: reuse this function with another parameters
-                        asio::buffer(EncodeArr2RespArr({"psync", "?", "-1"})),
-                        [self, this](const std::error_code &e, const size_t byte_transferred) {
-                            if (!e) {
-                                LOG_DEBUG("HandShake", "Finish sending command: psync ? -1");
-                                ReceivePsyncReply();
-                            } else {
-                                LOG_ERROR("HandShake", "error %s while send command psync", e.message().c_str());
-                                /// FIXME: handle the error
-                            }
-                        });
-            }
-        } else {
-            LOG_ERROR("HandShake", "Error %s while receive response of psync", ec.message().c_str());
-            /// FIXME: handle the error
-        }
-    });
+    sock_.async_read_some(asio::buffer(in_buf_),
+                          [self, this](const std::error_code &ec, const size_t byte_transferred) {
+                              if (!ec) {
+                                  LOG_DEBUG("HandShake", "Read %s from sock %d",
+                                            std::string(in_buf_.data(), byte_transferred).c_str(),
+                                            sock_.native_handle());
+                                  if (std::string(in_buf_.data(), byte_transferred) != RESP_OK) {
+                                      /// FIXME: handle the received response
+                                  } else {
+                                      sock_.async_write_some(
+                                              /// FIXME: reuse this function with another parameters
+                                              asio::buffer(EncodeArr2RespArr({"psync", "?", "-1"})),
+                                              [self, this](const std::error_code &e, const size_t byte_transferred) {
+                                                  if (!e) {
+                                                      LOG_DEBUG("HandShake", "Finish sending command: psync ? -1");
+                                                      ReceivePsyncReply();
+                                                  } else {
+                                                      LOG_ERROR("HandShake", "error %s while send command psync",
+                                                                e.message().c_str());
+                                                      /// FIXME: handle the error
+                                                  }
+                                              });
+                                  }
+                              } else {
+                                  LOG_ERROR("HandShake", "Error %s while receive response of psync",
+                                            ec.message().c_str());
+                                  /// FIXME: handle the error
+                              }
+                          });
 }
 
-void Client::ReceivePsyncReply() {
-    /// 1. read FULRESYNC
-    auto self(shared_from_this());
-    sock_.async_read_some(asio::buffer(in_buf_), [self, this](const std::error_code &ec, const size_t byte_transferred) {
-        if (!ec) {
-            LOG_DEBUG("HandShake", "Read %s from sock %d", std::string(in_buf_.data(), byte_transferred).c_str(),
-                      sock_.native_handle());
-            /// parse received string
-            /// find the new line '\n' to get FULLSYNC response
-            std::string fullresync_reply;
-            size_t pos = 0;
-            for (; pos < byte_transferred; pos++) {
-                if (in_buf_[pos] == '\n') {
-                    for (int i = 0; i < pos; ++i) {
-                        internal_buffer_.push_back(in_buf_[i]);
-                    }
+int Client::GetFullResync() {
+    if (received_fullresync_)
+        return 0;
 
-                    fullresync_reply = std::string(internal_buffer_.begin(), internal_buffer_.end());
-
-                    /// store the remainder of received data
-                    internal_buffer_.clear();
-                    for (int i = 0; i < byte_transferred - pos - 1; ++i) {
-                        internal_buffer_.emplace_back(in_buf_.at(pos + 1 + i));
-                    }
-
-                    break;
-                }
-            }
-
-            if (fullresync_reply.empty()) { /// not found '\n' in the above loop
-                /// append received data
-                for (size_t i = 0; i < byte_transferred; ++i) {
-                    internal_buffer_.push_back(in_buf_.at(i));
-                }
-
-                /// continue read to enough FULLRESYNC reply
-                ReceivePsyncReply();
-            } else {
-                /// Handle FULLRESYNC reply, update info
-                Server::GetInstance()->HandleFullResyncReply(fullresync_reply);
-
-                /**Create a temporary file in disk */
-                std::string tmp_file_path = Database::GetInstance()->GetRdbPath();
-                FILE *ptmp_file = fopen(tmp_file_path.c_str(), "wb");
-                if (!ptmp_file) {
-                    LOG_ERROR(TAG, "open temp file %s fail %s", tmp_file_path.c_str(), strerror(errno));
-                    return OpenRdbFileError;
-                }
-
-                /// Reading file .rdb with async method
-                ReadRdbFileReply(ptmp_file);
-            }
-        } else {
-            LOG_ERROR("HandShake", "Error %s while receive response of psync", ec.message().c_str());
-            /// FIXME: handle the error
-        }
-    });
-}
-
-int Client::ReadRdbLengthAndData(FILE *file) {
-    /// unknown file size. Try to get file size in the internal buffer
-    if (rdb_file_size_ <= 0) {
-        LOG_LINE();
-        for (int i = 0; i < internal_buffer_.size(); ++i) {
-            if (internal_buffer_[i] == '\n' && internal_buffer_[0] == '$') {
-                rdb_file_size_ = std::stoll(
-                        std::string(internal_buffer_.begin() + 1, internal_buffer_.begin() + i - 1));
-                /// store remainder in temp buffer
-                std::vector<char> tmp_buffer;
-                for (int j = i + 1; j < internal_buffer_.size(); ++j) {
-                    tmp_buffer.push_back(internal_buffer_[j]);
-                }
-
-                /// write to file if enough data
-                if (tmp_buffer.size() >= rdb_file_size_) {
-                    fwrite(tmp_buffer.data(), sizeof(char), tmp_buffer.size(), file);
-                    fclose(file);
-                    LOG_INFO("RDBSync", "Finish sync data from the master");
-                    internal_buffer_.clear();
-
-                    Database::GetInstance()->LoadPersistentDb();
-
-                    Server::GetInstance()->SetReplicaState(ReplicationState::ReplStateSynced);
-
-                    Server::GetInstance()->OnReady();
-
-                    return 2;
-                }
-
-                /// restore to internal buffer
-                internal_buffer_ = tmp_buffer;
-                /// internal buffer contains only binary data. update rdb_read_size
-                rdb_read_size_ = internal_buffer_.size();
-                return 1;
-            }
+    int pos = start_pos_;
+    for (; pos < internal_buffer_.size(); ++pos) {
+        if (internal_buffer_[pos] == '\n') {
+            LOG_LINE();
+            /// parse fullresync reply if found
+            Server::GetInstance()->HandleFullResyncReply(
+                    std::string(internal_buffer_.begin() + start_pos_, internal_buffer_.begin() + pos));
+            received_fullresync_ = true;
+            /// update start position of internal_buffer_
+            start_pos_ = pos + 1;
+            return 0;
         }
     }
 
+    return -1;
+}
+
+int Client::GetRdbFileSize() {
+    if (rdb_file_size_ > 0)
+        return rdb_file_size_;
+
+    if (start_pos_ >= internal_buffer_.size()) {
+        LOG_LINE();
+        return -1;
+    }
+
+    int pos = start_pos_;
+    /// find the signature '$'
+    while (pos < internal_buffer_.size() && internal_buffer_[pos] != '$') ++pos;
+    /// move next character
+    ++pos;
+    start_pos_ = pos;
+
+    LOG_LINE();
+    for (; pos < internal_buffer_.size(); ++pos) {
+        if (internal_buffer_[pos] == '\n') {
+            LOG_LINE();
+            LOG_LINE();
+            for (int i = start_pos_; i < pos; ++i) {
+                printf("%x", internal_buffer_[i]);
+            }
+            LOG_LINE();
+            fflush(stdout);
+            rdb_file_size_ = std::stoll(
+                    std::string(internal_buffer_.begin() + start_pos_, internal_buffer_.begin() + pos));
+            start_pos_ = pos + 1;
+            LOG_DEBUG("Client", "start pos %zu, pos %d, rdb size %llu", start_pos_, pos, rdb_file_size_);
+            return rdb_file_size_;
+        }
+    }
+    LOG_LINE();
+
+    return -1;
+}
+
+int Client::TryWriteRdb() {
+    /// only called when know the rdb file size
+    if (rdb_file_size_ <= 0)
+        return -1;
+
+    if (internal_buffer_.size() >= BULK_SIZE || rdb_read_size_ >= rdb_file_size_) {
+        size_t need_to_write = rdb_file_size_ - rdb_written_size_;
+        LOG_LINE();
+        FlushBuffer2File(need_to_write);
+
+        if (rdb_read_size_ >= rdb_file_size_) {
+
+            CloseFile();
+            LOG_INFO("Client", "Finish write RDB file");
+
+            Database::GetInstance()->LoadPersistentDb();
+
+            Server::GetInstance()->SetReplicaState(ReplicationState::ReplStateSynced);
+
+            return 1;
+        }
+    }
+
+    /// has not enough data to write
     return 0;
 }
 
-void Client::ReadRdbFileReply(FILE *file) {
-    /// Format of this response: $<length_of_file>\r\n<binary_contents_of_file>
-    /// try to get rdb file size from internal buffer. If it was known, redis skip this line
-    if (ReadRdbLengthAndData(file) == 2) {
-        LOG_LINE();
-        ReadAsync();
-        LOG_LINE();
-        return;
-    }
-
-    /// read binary data from the master.
-    /// Coming data was stored in in_buf_ -> copy to internal_buffer_.
-    /// The internal_buffer_ must has enough size before writing to disk.
+void Client::ReceivePsyncReply() {
+    LOG_DEBUG("HandShake", "Prepare receive psync reply sock %d", sock_.native_handle());
+    /// 1. read FULRESYNC
     auto self(shared_from_this());
     sock_.async_read_some(asio::buffer(in_buf_),
-                          [this, self, file](const std::error_code &ec, const size_t received_bytes) {
+                          [self, this](const std::error_code &ec, const size_t byte_transferred) {
                               if (!ec) {
-                                  LOG_DEBUG("ReplicaSync", "Receive %zu bytes", received_bytes);
-                                  /// append all data in buffer (include previous data)
-                                  for (size_t i = 0; i < received_bytes; ++i) {
-                                      internal_buffer_.push_back(in_buf_[i]);
+                                  LOG_DEBUG("HandShake", "Read %zu bytes from sock %d",
+                                            byte_transferred,
+                                            sock_.native_handle());
+
+                                  /// append all new data to internal buffer
+                                  for (int pos = 0; pos < byte_transferred; ++pos) {
+                                      internal_buffer_.push_back(in_buf_[pos]);
                                   }
 
-                                  /// try to determine the rdb file size with new data
-                                  int ret = ReadRdbLengthAndData(file);
-                                  /**
-                                   * HACK:
-                                   * ret == 2: read and write all file -> return
-                                   * ret == 1: first time get the file size. the rdb_read_size was assign before, no need to plus
-                                   * ret == 0: dont know the file size or knew it before. plus the received_bytes
-                                   * */
-                                  if (ret == 2) {
-                                      ReadAsync();
-                                      return;
-                                  }
-                                  else if (rdb_file_size_ <= 0) {
-                                      /// still dont know rdb file size
-                                      /// continue read to get the file size
-                                      sock_.async_read_some(asio::buffer(in_buf_),
-                                                            [self, this, file](const std::error_code &e,
-                                                                               const size_t bytes) {
-                                                                if (!e) {
-                                                                    ReadRdbFileReply(file);
-                                                                }
-                                                            });
-                                      return;
+                                  /// find fullresync command
+                                  if (!received_fullresync_) {
+                                      if (GetFullResync() < 0) {
+                                          /// haven't read fullresync yet, async read again and return
+                                          ReceivePsyncReply();
+                                          return;
+                                      }
                                   }
 
-                                  if (ret == 0) {
-                                      rdb_read_size_ += received_bytes;
+                                  if (rdb_file_size_ <= 0) {
+                                      /// NOT go to this bracket if know the file size
+                                      if (GetRdbFileSize() < 0) {
+                                          /// haven't read file size yet, async read agin and return
+                                          ReceivePsyncReply();
+                                          return;
+                                      } else {
+                                          rdb_read_size_ = internal_buffer_.size() - start_pos_;
+                                      }
+                                  } else {
+                                      rdb_read_size_ += byte_transferred;
                                   }
 
-                                  if (rdb_read_size_ >= rdb_file_size_ || internal_buffer_.size() >= BULK_SIZE) {
-                                      /// known file before. after this read, receive enough file
-                                      /// write all data to file and close
-                                      fwrite(internal_buffer_.data(), sizeof(char), internal_buffer_.size(), file);
-                                      internal_buffer_.clear();
-                                      if (rdb_read_size_ >= rdb_file_size_) {
-                                          LOG_INFO("RDBSync", "Finish sync data from the master");
-                                          fclose(file);
-
-                                          Database::GetInstance()->LoadPersistentDb();
-
-                                          Server::GetInstance()->SetReplicaState(ReplicationState::ReplStateSynced);
-
-                                          Server::GetInstance()->OnReady();
+                                  if (rdb_file_size_ > 0) {
+                                      int ret = TryWriteRdb();
+                                      if (ret == -1) {
+                                          ReceivePsyncReply();
+                                          return;
+                                      } else if (ret == 0) {
+                                          ReceivePsyncReply();
+                                          return;
+                                      } else {
+                                          /// after that, if there are data in internal_buff_, trye to execute these command
+                                          if (internal_buffer_.size() > start_pos_) {
+                                              executor_.ReceiveDataAndExecute(
+                                                      std::string(internal_buffer_.data() + start_pos_), self);
+                                              /// reset internal buffer
+                                              internal_buffer_.clear();
+                                              start_pos_ = 0;
+                                          }
 
                                           ReadAsync();
                                       }
                                   }
-
-                                  /// only call it when expect more data
-                                  if (rdb_read_size_ < rdb_file_size_) {
-                                      /// continue reading
-                                      ReadRdbFileReply(file);
-                                  }
                               } else {
-                                  /// FIXME: handle error???
-                                  /// mark the server state: repl fail
-                                  LOG_ERROR("ReplicaSync", "Error %s", ec.message().c_str());
+                                  LOG_ERROR("HandShake", "Error %s while receive response of psync",
+                                            ec.message().c_str());
+                                  /// FIXME: handle the error
                               }
                           });
 }
@@ -495,6 +431,7 @@ void Client::PropagateRdb(const std::string &rdb_file_path) {
     char prefix_rdb[20] = {0};
     uint64_t rdb_size = 0, total_sent = 0;
 
+    filename_ = rdb_file_path;
     LOG_DEBUG(TAG, "start sending replica prefix through fd %d", sock_.native_handle());
     struct stat st;
     if (RdbStat(rdb_file_path, st) < 0) {
@@ -506,10 +443,11 @@ void Client::PropagateRdb(const std::string &rdb_file_path) {
 
     snprintf(prefix_rdb, 19, "$%llu\r\n", rdb_size);
 
+    LOG_DEBUG(TAG, "send prefix %s of file %s", prefix_rdb, filename_.c_str());
     /** send data */
     ///  First, send the length of rdb
     auto self(shared_from_this());
-    sock_.async_write_some(asio::buffer(prefix_rdb),
+    sock_.async_write_some(asio::buffer(prefix_rdb, strlen(prefix_rdb)),
                            [self, this, rdb_file_path](const std::error_code &error, const size_t byte_transferred) {
                                if (error) {
                                    LOG_ERROR(TAG, "Send prefix rdb fail %d: %s", error.value(),
@@ -517,9 +455,76 @@ void Client::PropagateRdb(const std::string &rdb_file_path) {
                                } else {
                                    /// Second, read and send binary rdb
                                    /// because MACOSX does not support ASIO_HAS_IO_URING, so we use normal blocking file read/write
-                                   std::shared_ptr<std::ifstream> pfile = std::make_shared<std::ifstream>(
-                                           rdb_file_path);
-                                   WriteStreamFileAsync(pfile);
+                                   WriteStreamFileAsync();
                                }
                            });
 }
+
+void Client::OpenFile() {
+#if defined(_WIN32)
+    HANDLE h = ::CreateFileA(filename_.c_str(),
+                             GENERIC_WRITE,
+                             FILE_SHARE_READ,
+                             NULL,
+                             CREATE_ALWAYS,
+                             FILE_ATTRIBUTE_NORMAL,
+                             NULL);
+    file_ = asio::windows::random_access_handle(io_, h);
+#else
+//    int fd = ::open(filename_.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0666);
+//    file_ = asio::posix::stream_descriptor(io_context_, fd);
+#endif
+
+    fd_ = ::open(filename_.c_str(), O_CREAT | O_RDWR, 0666);
+    file_opened_ = true;
+
+    size_t file_size = 0;
+#if ZDEBUG
+    struct stat st;
+    if (RdbStat(filename_, st) < 0) {
+        std::cerr << "Stat() file " << filename_ << "error " << strerror(errno) << std::endl;
+        return;
+    } else {
+        file_size = st.st_size;
+    }
+#endif // ZDEBUG
+
+    LOG_DEBUG("Client", "file opened %s, size %lu", filename_.c_str(), file_size);
+}
+
+void Client::FlushBuffer2File(size_t bytes) {
+    if (!file_opened_) {
+        OpenFile();
+        file_opened_ = 1;
+    }
+
+    ssize_t written = ::write(fd_, internal_buffer_.data() + start_pos_, bytes);
+    LOG_DEBUG("Client", "need to write %zu, write %ld bytes from %zu in internal buffer size %zu to file %s",
+              bytes, written, start_pos_, internal_buffer_.size(), filename_.c_str());
+
+    start_pos_ += written;
+    rdb_written_size_ += written;
+
+    if (start_pos_ >= internal_buffer_.size()) { /// write full
+        internal_buffer_.clear();
+        start_pos_ = 0;
+    } else {
+        LOG_ERROR("Client", "File %s write error, written %ld", filename_.c_str(), written);
+    }
+}
+
+void Client::CloseFile() {
+    if (!file_opened_)
+        return;
+
+    ::close(fd_);
+    file_opened_ = 0;
+}
+
+void Client::ReadFile2Buffer() {
+    if (!file_opened_)
+        return;
+
+    ssize_t read_bytes = ::read(fd_, internal_buffer_.data(), internal_buffer_.size());
+}
+

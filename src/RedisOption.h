@@ -33,4 +33,6 @@ extern const RedisOptionDef redis_options[];
 
 const RedisOptionDef *find_redis_option(const RedisOptionDef *options, const char *arg);
 
+std::string get_rdb_file_path();
+
 #endif //REDIS_STARTER_CPP_REDISOPTION_H

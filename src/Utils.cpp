@@ -2,6 +2,9 @@
 // Created by Manh Nguyen Viet on 7/21/25.
 //
 #include <bitset>
+#include <fstream>
+#include <iostream>
+#include <iomanip>
 
 #include "Utils.h"
 #include "all.hpp"
@@ -96,4 +99,24 @@ void hexToBinaryData(const std::string &hexStr, std::vector<unsigned char> &bina
 
         binaryData.push_back(byte);  // Store the byte in the vector
     }
+}
+
+void showBinFile(const std::string& filename) {
+    // Open the file in binary mode
+    std::ifstream infile(filename, std::ios_base::binary);
+
+    if (!infile.is_open()) {
+        std::cerr << "Error: Could not open file " << filename << std::endl;
+        return;
+    }
+
+    // Read and display bytes in hexadecimal
+    unsigned char byte;
+    while (infile.read(reinterpret_cast<char*>(&byte), 1)) {
+        std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned short>(byte) << "";
+    }
+
+    std::cout << std::endl;
+
+    infile.close();
 }

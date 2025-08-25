@@ -8,7 +8,7 @@
 #define ASIO_LIB 1
 #define HARDCODE 1
 
-#define ZDEBUG 1
+#define ZDEBUG 0
 
 enum struct LogLevel {
     Silent = 0,

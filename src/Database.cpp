@@ -58,11 +58,7 @@ std::string Database::RetrieveValueOfKey(const std::string &key) {
     }
 }
 
-int Database::SetConfig(const std::shared_ptr<RedisConfig> &cfg) {
-    std::lock_guard lock(m_);
-    if (IsEqualConfig(cfg))
-        return 1;
-
+int Database::SetConfig(RedisConfig* cfg) {
     rdb_cfg_ = cfg;
 
     /// Onload new config
@@ -138,58 +134,6 @@ bool Database::IsEqualConfig(const std::shared_ptr<RedisConfig> &cfg) const {
             && rdb_cfg_->dir_path == cfg->dir_path);
 }
 
-ssize_t Database::SaveRdbBackground(const std::string &file_name) {
-    /// create pipe to write in child proc, read in parent proc
-    Server::GetInstance()->OpenChildInfoPipe();
-
-    pid_t child_pid;
-    if ((child_pid = fork()) == 0) {
-        /// child proc: save current db to rdb format
-
-        /// close reading part in child proc
-        close(Server::GetInstance()->GetChildInfoReadPipe());
-
-        /// save the memory db to the local file
-#if HARDCODE
-        LOG_DEBUG(TAG, "Start save empty rdb");
-        std::string hex = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
-
-        std::string data = RdbHex2Bin(hex);
-        std::vector<unsigned char> binaryData;
-        hexToBinaryData(hex, binaryData);
-
-        FILE *file = fopen(file_name.c_str(), "wb");
-
-        fwrite(binaryData.data(), sizeof(unsigned char), binaryData.size(), file);
-
-        fclose(file);
-        LOG_DEBUG(TAG, "Finish save empty rdb")
-
-#else
-        char magic[10] = {0};
-        /// version
-        snprintf(magic,sizeof(magic),"REDIS%04d",version_);
-        Server::SendData(fd, magic);
-#endif // HARDCODE
-
-        /// TODO: notify to parent end of child proc
-        _exit(0);
-    } else {
-        /// parent proc
-        if (child_pid == -1) {
-            /// create fail
-            Server::GetInstance()->CloseChildInfoPipe();
-            return -1;
-        }
-
-        Server::GetInstance()->SetChildPid(child_pid);
-        /// close unused writing part
-        close(Server::GetInstance()->GetChildInfoWritePipe());
-    }
-
-    return 0;
-}
-
 std::string Database::GetRdbPath() const {
     if (rdb_cfg_) {
         std::string deliminator = (!rdb_cfg_->dir_path.empty() && rdb_cfg_->dir_path.back() == '/') ? "" : "/";
@@ -212,8 +156,6 @@ int Database::LoadPersistentDb() {
         LOG_ERROR("DB", "Empty rdb file path");
         return -1;
     }
-
-    std::ifstream ifs(rdb_file);
 
     /// 2. reset current db
     Reset();

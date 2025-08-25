@@ -10,9 +10,11 @@
 #include "RedisDef.h"
 
 LogLevel global_log_level = LogLevel::Silent;
+RedisConfig* globale_cfg = nullptr;
+
 const char TAG[] = "RDB";
 
-static int redis_parse_options(int argc, char **argv, std::shared_ptr<RedisConfig> cfg) {
+static int redis_parse_options(int argc, char **argv, RedisConfig* cfg) {
     int idx = 1;
     while (idx < argc) {
         char *arg = argv[idx];
@@ -27,7 +29,7 @@ static int redis_parse_options(int argc, char **argv, std::shared_ptr<RedisConfi
             const char *val = argv[++idx];
             const RedisOptionDef *opt = find_redis_option(redis_options, name.c_str());
             if (opt) {
-                opt->func_arg(cfg.get(), val);
+                opt->func_arg(cfg, val);
             } else {
                 LOG_ERROR(TAG, "%s, %d, idx %d, name %s\n", __func__, __LINE__, idx, name.c_str());
                 return -1;
@@ -45,10 +47,10 @@ static int redis_parse_options(int argc, char **argv, std::shared_ptr<RedisConfi
     return 0;
 }
 
-static void redis_set_global_config(const std::shared_ptr<RedisConfig> &cfg) {
-    Database::GetInstance()->SetConfig(cfg);
+static void redis_set_global_config() {
+    Database::GetInstance()->SetConfig(globale_cfg);
 
-    Server::GetInstance()->SetConfig(cfg);
+    Server::GetInstance()->SetConfig(globale_cfg);
 }
 
 static void set_log_level(LogLevel lvl) {
@@ -60,11 +62,11 @@ int main(int argc, char **argv) {
     std::cout << std::unitbuf;
     std::cerr << std::unitbuf;
 
-    set_log_level(LogLevel::Debug);
+    set_log_level(LogLevel::Info);
 
     /// parse the argv
-    std::shared_ptr<RedisConfig> cfg = std::make_shared<RedisConfig>();
-    int ret = redis_parse_options(argc, argv, cfg);
+    globale_cfg = new RedisConfig();
+    int ret = redis_parse_options(argc, argv, globale_cfg);
     if (ret < 0) {
         LOG_ERROR(TAG, "Invalid parameters, total %d ret %d", argc, ret);
         for (int i = 0; i < argc; ++i) {
@@ -73,11 +75,16 @@ int main(int argc, char **argv) {
         return -1;
     }
 
-    redis_set_global_config(cfg);
+    redis_set_global_config();
 
     Server::GetInstance()->Setup();
 
-    Server::GetInstance()->StartMaster();
+    if (globale_cfg->is_replica)
+    {
+        Server::GetInstance()->StartReplica();
+    } else {
+        Server::GetInstance()->StartMaster();
+    }
 
     return 0;
 }
