@@ -32,7 +32,8 @@ void Client::ReadAsync() {
 }
 
 void Client::WriteAsync(const std::string &reply) {
-    LOG_INFO("Client", "write reply %s, sock %d, client type %d", reply.c_str(), sock_.native_handle(), client_type_);
+    LOG_INFO("Client", "write reply %s, sock %d, client type %d, executor flags %d", reply.c_str(),
+             sock_.native_handle(), client_type_, executor_.Flags());
     /// no need to reply to master server
     /// FIXME: more details
     if (!(client_type_ & executor_.Flags()))

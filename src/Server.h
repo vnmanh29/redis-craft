@@ -16,6 +16,7 @@
 #include "CommandExecutor.h"
 #include "RedisDef.h"
 #include "Client.h"
+#include "CircularBuffer.h"
 
 #if ASIO_LIB
 
@@ -54,6 +55,7 @@ typedef struct ReplicationInfo {
     int is_replica;
     std::string master_host;
     int master_port;
+    int64_t repl_offset;       /// <replica only>: offset of the replica server
     ReplicationState replica_state;
 
     // default constructor
@@ -88,6 +90,8 @@ private:
     asio::ip::tcp::acceptor acceptor_;  /// asio acceptor to handle incoming connections
     tcp::socket replica_socket_;    /// <replica only>: socket in the replica server connect to the master
     asio::signal_set signal_;   /// use to check the changing state of child process
+
+    CircularBuffer backlog_;
 
 private:
     Server() = default;
@@ -133,7 +137,7 @@ public:
     /// Accept coming connections
     void DoAccept();
 
-    void SetConfig(RedisConfig* cfg);
+    void SetConfig(RedisConfig *cfg);
 
     void SetReplicaState(const ReplicationState state) { replication_info_.replica_state = state; }
 
@@ -164,6 +168,16 @@ public:
     int GetPort() const { return port_; }
 
     ssize_t SaveRdbBackground(const std::string &file_name);
+
+    void AddBackLogBuffer(const std::string &data);
+
+    int64_t GetServerOffset() const {
+        if (replication_info_.is_replica) {
+            return replication_info_.repl_offset;
+        } else {
+            return replication_info_.master_repl_offset;
+        }
+    }
 };
 
 

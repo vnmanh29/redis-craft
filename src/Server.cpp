@@ -75,7 +75,7 @@ int Server::StartReplica() {
     return 0;
 }
 
-void Server::SetConfig(RedisConfig* cfg) {
+void Server::SetConfig(RedisConfig *cfg) {
     if (cfg) {
         /// TODO: add more config properties belong to network???
 
@@ -275,7 +275,12 @@ int Server::SetupCommands() {
 
     AddCommand("keys", KeysCmd, CMD_READ);
     AddCommand("info", InfoCmd, CMD_READ);
-    AddCommand("replconf", ReplconfCmd, CMD_READ);
+
+    AddCommand("replconf", "listening-port", ReplconfListeningPortCmd, CMD_READ);
+    AddCommand("replconf", "capa", ReplconfCapaCmd, CMD_READ);
+    AddCommand("replconf", "ack", ReplconfAckCmd, CMD_READ);
+    AddCommand("replconf", "getack", ReplconfGetackCmd, CMD_READ | CMD_REPLICATED);
+
     AddCommand("psync", PSyncCmd, CMD_READ);
 
     return 0;
@@ -401,5 +406,15 @@ ssize_t Server::SaveRdbBackground(const std::string &file_name) {
     }
 
     return 0;
+}
+
+void Server::AddBackLogBuffer(const std::string &data) {
+    if (replication_info_.is_replica) {
+        /// only update offset, no need store backlog buffer
+        replication_info_.repl_offset += data.size();
+    } else {
+        AppendDataBuffer(&backlog_, data);
+        replication_info_.master_repl_offset += data.size();
+    }
 }
 

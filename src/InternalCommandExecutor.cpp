@@ -137,13 +137,7 @@ class PingCommandExecutor : public AbstractInternalCommandExecutor {
 
         SetFlags(CLIENT_REPLY_SUPPORTED);// | MASTER_REPLY_SUPPORTED);
 //        SetFlags(CLIENT_REPLY_SUPPORTED);
-
-//        if (client->ClientType() == ClientType::TypeMaster) {
-//            client->WriteAsync(EncodeArr2RespArr({"REPLCONF", "ACK", "0"}));
-//        }
-//        else {
-            client->WriteAsync(response);
-//        }
+        client->WriteAsync(response);
     }
 };
 
@@ -266,7 +260,9 @@ private:
 
                 SetFlags(MASTER_REPLY_SUPPORTED);
 
-                reply = EncodeArr2RespArr({"REPLCONF", "ACK", "0"});
+                int64_t offset = Server::GetInstance()->GetServerOffset();
+
+                reply = EncodeArr2RespArr({"REPLCONF", "ACK", std::to_string(offset)});
 
                 LOG_DEBUG("REPL", "reply %s", reply.c_str());
             } else if (arg1 == "LISTENING-PORT") { /// send from slave to master for psync cmd
@@ -359,7 +355,13 @@ AbstractInternalCommandExecutor::createCommandExecutor(const CommandType cmd_typ
             return std::make_shared<KeysCommandExecutor>();
         case InfoCmd:
             return std::make_shared<InfoCommandExecutor>();
-        case ReplconfCmd:
+        case ReplconfListeningPortCmd:
+            return std::make_shared<ReplconfCommandExecutor>();
+        case ReplconfCapaCmd:
+            return std::make_shared<ReplconfCommandExecutor>();
+        case ReplconfAckCmd:
+            return std::make_shared<ReplconfCommandExecutor>();
+        case ReplconfGetackCmd:
             return std::make_shared<ReplconfCommandExecutor>();
         case PSyncCmd:
             return std::make_shared<PSyncCommandExecutor>();

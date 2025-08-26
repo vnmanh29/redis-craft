@@ -45,6 +45,11 @@ int CommandExecutor::ReceiveDataAndExecute(const std::string &buffer, std::share
             LOG_INFO(TAG, "build cmd %d success flag %llu", query_.cmd->cmd_type, query_.cmd->flags);
         }
 
+        if (client->ClientType() == ClientType::TypeMaster) {
+            /// this command was propagated from its master, so it is replicated command
+            query_.flags |= CMD_REPLICATED;
+        }
+
         ret = BuildExecutor();
         if (ret < 0) {
             LOG_ERROR(TAG, "Build executor fail, error %d", ret);
@@ -59,32 +64,37 @@ int CommandExecutor::ReceiveDataAndExecute(const std::string &buffer, std::share
         offset += res.size();
         LOG_DEBUG("", "remain data %s", data_.c_str());
 
-        /// propagate this command to the slaves if this is write command
-        int is_write_cmd = (query_.flags & CMD_WRITE) ? 1 : 0;
-        /// validate the write command
-        if (!is_write_cmd)
+        /// propagate this command to the slaves if need to propagate this command
+        int need_propagate = ((query_.flags & CMD_WRITE) | (query_.flags & CMD_REPLICATED)) ? 1 : 0;
+
+        /// first, encode the command to a list of RESP string
+        std::vector<std::string> resp_arr = encoder_.encode_arr(query_.cmd_args);
+
+        /// second, concat all argv to get the entire resp_data
+        std::string resp_data;
+        for (auto &argv: resp_arr) {
+            resp_data += argv;
+        }
+
+        /// update offset
+        if (client->ClientType() == TypeMaster || need_propagate)
+            Server::GetInstance()->AddBackLogBuffer(resp_data);
+
+        /// move next loop if this cmd no need to propagate
+        if (!need_propagate)
             continue;
 
         /// FIXME: handle case replica server received the command from its master
         if (client->ClientType() == TypeMaster)
             continue;
 
-        /// first, encode the command to RESP
-        std::vector<std::string> replies = encoder_.encode_arr(query_.cmd_args);
-
-        /// second, concat all argv to get the entire response
-        std::string response;
-        for (auto &rely: replies) {
-            response += rely;
-        }
-
-        /// third, loop and fill entire response to output buffer of slaves
+        /// third, loop and fill entire resp_data to output buffer of slaves
         auto clients = Server::GetInstance()->GetClients();
-        for (const auto &cli : clients) {
+        for (const auto &cli: clients) {
             if (cli->ClientType() == ClientType::TypeSlave) {
-                /// FIXME: handle case copy the response to output buffer fail
-                LOG_DEBUG(TAG, "send %s through sock %d", response.c_str(), cli->Socket().native_handle());
-                cli->WriteAsync(response);
+                /// FIXME: handle case copy the resp_data to output buffer fail
+                LOG_DEBUG(TAG, "send %s through sock %d", resp_data.c_str(), cli->Socket().native_handle());
+                cli->WriteAsync(resp_data);
             }
         }
     }
