@@ -240,7 +240,79 @@ public:
     }
 };
 
-class ReplconfCommandExecutor : public AbstractInternalCommandExecutor {
+class ReplconfListeningPortCommandExecutor : public AbstractInternalCommandExecutor {
+private:
+    std::string GetResponse(const Query &query, std::shared_ptr<Client> client) {
+        std::string reply = RESP_NIL;
+
+        if (query.cmd_args.size() < 3) {
+            return RESP_OK;
+        } else {
+            std::string arg1 = query.cmd_args[1];
+            std::string arg2 = query.cmd_args[2];
+            std::transform(arg1.begin(), arg1.end(), arg1.begin(), ::toupper);
+            if (arg1 != "LISTENING-PORT") {
+                return RESP_NIL;
+            }
+
+            /// send from slave to master for psync cmd
+            /// set it become slave server
+            client->SetClientType(ClientType::TypeSlave);
+            client->SetSlaveState(SlaveState::WaitBGSaveStart);
+
+            SetFlags(SLAVE_REPLY_SUPPORTED);
+
+            /// TODO: handle arg2
+            reply = RESP_OK;
+        }
+        return reply;
+    }
+
+public:
+    void execute(const Query &query, std::shared_ptr<Client> client) override {
+        /// TODO: handle the argument
+        std::string response = GetResponse(query, client);
+
+        client->WriteAsync(response);
+    }
+};
+
+class ReplconfCapaCommandExecutor : public AbstractInternalCommandExecutor {
+private:
+    std::string GetResponse(const Query &query, std::shared_ptr<Client> client) {
+        std::string reply = RESP_NIL;
+
+        if (query.cmd_args.size() < 3) {
+            return RESP_OK;
+        } else {
+            std::string arg1 = query.cmd_args[1];
+            std::string arg2 = query.cmd_args[2];
+            std::transform(arg1.begin(), arg1.end(), arg1.begin(), ::toupper);
+            if (arg1 != "CAPA") { /// send from slave to master for psync
+                return RESP_NIL;
+            }
+
+            /// set it become slave server
+            client->SetClientType(ClientType::TypeSlave);
+            client->SetSlaveState(SlaveState::WaitBGSaveStart);
+
+            SetFlags(SLAVE_REPLY_SUPPORTED);
+            /// TODO: handle arg2
+            reply = RESP_OK;
+        }
+        return reply;
+    }
+
+public:
+    void execute(const Query &query, std::shared_ptr<Client> client) override {
+        /// TODO: handle the argument
+        std::string response = GetResponse(query, client);
+
+        client->WriteAsync(response);
+    }
+};
+
+class ReplconfAckCommandExecutor : public AbstractInternalCommandExecutor {
 private:
     std::string GetResponse(const Query &query, std::shared_ptr<Client> client) {
         LOG_LINE();
@@ -285,6 +357,42 @@ private:
             }
         }
         return reply;
+    }
+
+public:
+    void execute(const Query &query, std::shared_ptr<Client> client) override {
+        /// TODO: handle the argument
+        std::string response = GetResponse(query, client);
+
+        client->WriteAsync(response);
+    }
+};
+
+class ReplconfGetAckCommandExecutor : public AbstractInternalCommandExecutor {
+private:
+    std::string GetResponse(const Query &query, std::shared_ptr<Client> client) {
+        std::string reply = RESP_NIL;
+
+        if (query.cmd_args.size() < 3) {
+            return RESP_NIL;
+        } else {
+            std::string arg1 = query.cmd_args[1];
+            std::string arg2 = query.cmd_args[2];
+            std::transform(arg1.begin(), arg1.end(), arg1.begin(), ::toupper);
+            if (arg1 == "GETACK") { /// from master send to slave
+                /// set it is master server
+                client->SetClientType(ClientType::TypeMaster);
+
+                SetFlags(MASTER_REPLY_SUPPORTED);
+
+                int64_t offset = Server::GetInstance()->GetServerOffset();
+
+                reply = EncodeArr2RespArr({"REPLCONF", "ACK", std::to_string(offset)});
+            } else {
+                reply = RESP_NIL;
+            }
+            return reply;
+        }
     }
 
 public:
@@ -356,13 +464,13 @@ AbstractInternalCommandExecutor::createCommandExecutor(const CommandType cmd_typ
         case InfoCmd:
             return std::make_shared<InfoCommandExecutor>();
         case ReplconfListeningPortCmd:
-            return std::make_shared<ReplconfCommandExecutor>();
+            return std::make_shared<ReplconfListeningPortCommandExecutor>();
         case ReplconfCapaCmd:
-            return std::make_shared<ReplconfCommandExecutor>();
+            return std::make_shared<ReplconfCapaCommandExecutor>();
         case ReplconfAckCmd:
-            return std::make_shared<ReplconfCommandExecutor>();
+            return std::make_shared<ReplconfAckCommandExecutor>();
         case ReplconfGetackCmd:
-            return std::make_shared<ReplconfCommandExecutor>();
+            return std::make_shared<ReplconfGetAckCommandExecutor>();
         case PSyncCmd:
             return std::make_shared<PSyncCommandExecutor>();
         case FullresyncCmd:
