@@ -172,6 +172,15 @@ public:
       return buf;
   }
 
+  buffer_t encode_integer(buffer_t const& number)
+  {
+    buffer_t buf;
+    buf.append(":");
+    buf.append(number);
+    buf.append("\r\n");
+    return buf;
+  }
+
 public:
   class command
   {

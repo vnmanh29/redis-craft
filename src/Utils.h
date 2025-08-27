@@ -37,6 +37,7 @@ enum CommandType {
     ReplconfGetackCmd,
     PSyncCmd,
     FullresyncCmd,
+    WaitCmd,
     UnknownCmd
 };
 
@@ -58,6 +59,8 @@ typedef struct Query {
 std::string EncodeArr2RespArr(std::vector<std::string> arr);
 
 std::string EncodeRespSimpleStr(std::string s);
+
+std::string EncodeRespInteger(const int n);
 
 void ResetQuery(Query &query);
 

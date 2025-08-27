@@ -66,8 +66,7 @@ void Client::ReadBulkAsyncWriteFile(const size_t total_size, size_t current_read
                                   if (bulk_.size() >= BULK_SIZE || read_bytes >= total_size) {
                                       LOG_DEBUG(TAG, "write %lu bytes, current_read %lu", byte_transferred,
                                                 read_bytes);
-                                      LOG_LINE();
-                                      //   LOG_ERROR(TAG, "bulk %s", bulk_.data());
+
                                       fwrite(bulk_.data(), sizeof(char), bulk_.size(), pfile);
                                       LOG_LINE();
                                       bulk_.clear();
@@ -315,8 +314,6 @@ int Client::GetRdbFileSize() {
     LOG_LINE();
     for (; pos < internal_buffer_.size(); ++pos) {
         if (internal_buffer_[pos] == '\n') {
-            LOG_LINE();
-            LOG_LINE();
             for (int i = start_pos_; i < pos; ++i) {
                 printf("%x", internal_buffer_[i]);
             }
@@ -329,7 +326,6 @@ int Client::GetRdbFileSize() {
             return rdb_file_size_;
         }
     }
-    LOG_LINE();
 
     return -1;
 }
@@ -416,6 +412,9 @@ void Client::ReceivePsyncReply() {
                                               internal_buffer_.clear();
                                               start_pos_ = 0;
                                           }
+
+                                          /// start heartbeat mechanism after connecting to the master
+//                                          Server::GetInstance()->HeartbeatMechanism();
 
                                           ReadAsync();
                                       }
@@ -527,5 +526,19 @@ void Client::ReadFile2Buffer() {
         return;
 
     ssize_t read_bytes = ::read(fd_, internal_buffer_.data(), internal_buffer_.size());
+}
+
+void Client::HandleWaitCommand(const int timeout) {
+    auto self(shared_from_this());
+    timer_.async_wait([this, self](const std::error_code& ec) {
+        if (!ec || ec == asio::error::operation_aborted) {
+            LOG_DEBUG("Client", "Finish waiting ");
+            std::string msg = EncodeRespInteger(num_good_replicas_);
+            WriteAsync(msg);
+        }
+        else {
+            LOG_ERROR("Client", "Wait end with error %s", ec.message().c_str());
+        }
+    });
 }
 

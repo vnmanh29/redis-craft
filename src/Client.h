@@ -21,6 +21,7 @@ enum SlaveState {
     SlaveOnline = 0,
     WaitBGSaveStart = 1,
     WaitBGSaveEnd = 2,
+    WaitCmdBlocked = 3,
 };
 
 #define CLIENT_REPLY_SUPPORTED (1<<0)
@@ -78,8 +79,38 @@ public:
 
     void PropagateRdb(const std::string &rdb_path);
 
+    /// only used when client is a replica server
+    void SetSlaveOffset(uint64_t offset) {
+        prev_repl_offset_ = repl_offset_;
+        repl_offset_ = offset;
+    }
+
+    uint64_t GetSlaveOffset() const { return repl_offset_; }
+
+    uint64_t GetSlavePrevOffset() const { return prev_repl_offset_; }
+
+    void SetTargetOffset(const uint64_t offset) { target_offset_ = offset; };
+
+    uint64_t TargetOffset() const { return target_offset_; };
+
+    void SetNumGoodReplicas(int num) { num_good_replicas_ = num; }
+
+    uint GetNumGoodReplicas() const { return num_good_replicas_; }
+
+    void SetMinGoodReplicas(int num) { min_good_replicas_ = num; }
+
+    uint GetMinGoodReplicas() const { return min_good_replicas_; }
+
+    void HandleWaitCommand(const int timeout);
+
+    void CancelWaiting() {
+        LOG_DEBUG("Client", "cancel waiting");
+        timer_.cancel();
+    }
+
 private:
-    explicit Client(asio::io_context &io_ctx) : io_context_(io_ctx), sock_(io_ctx), bulk_(), client_type_(TypeRegular),
+    explicit Client(asio::io_context &io_ctx) : io_context_(io_ctx), sock_(io_ctx), timer_(io_ctx), bulk_(),
+                                                client_type_(TypeRegular),
                                                 slave_state_(SlaveState::SlaveOnline), file_(io_ctx),
                                                 received_fullresync_(false), start_pos_(0), rdb_file_size_(0),
                                                 rdb_read_size_(0), rdb_written_size_(0) {
@@ -87,6 +118,7 @@ private:
     }
 
     explicit Client(asio::io_context &io_ctx, tcp::socket &socket) : io_context_(io_ctx), sock_(std::move(socket)),
+                                                                     timer_(io_ctx),
                                                                      bulk_(),
                                                                      client_type_(TypeRegular),
                                                                      slave_state_(SlaveState::SlaveOnline),
@@ -126,6 +158,7 @@ private:
 private:
     asio::io_context &io_context_;
     tcp::socket sock_;
+    asio::steady_timer timer_;
 
     /// beginning position of input buffer.
     /// With write method, it is the beginning writable position, with read method, it's the beginning readable position
@@ -150,6 +183,14 @@ private:
 
     int client_type_;
     int slave_state_;
+
+    /// used when client is a replica server, the offset that replica has synced
+    uint64_t repl_offset_, prev_repl_offset_;
+
+    uint64_t target_offset_; /// used for the client is blocked, waiting for enough good replica
+
+    uint num_good_replicas_, min_good_replicas_;
+
 };
 
 

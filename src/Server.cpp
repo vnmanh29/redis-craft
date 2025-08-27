@@ -36,7 +36,8 @@ Server::Server(asio::io_context &io_context) : acceptor_(io_context, tcp::endpoi
                                                port_(server_port),
                                                io_context_(io_context),
                                                replica_socket_(io_context),
-                                               signal_(io_context, SIGCHLD) {
+                                               signal_(io_context, SIGCHLD),
+                                               timer_(io_context), heartbeat_retry_(0) {
 }
 
 Server *Server::GetInstance() {
@@ -125,10 +126,10 @@ int Server::SyncWithMaster() {
 
     try {
         /// create a client presents for its master server
-        auto master_server = Client::create(io_context_);
-        master_server->SetClientType(ClientType::TypeMaster);
+        master_ = Client::create(io_context_);
+        master_->SetClientType(ClientType::TypeMaster);
 
-        int ret = master_server->ConnectAsync(io_context_, host, port);
+        int ret = master_->ConnectAsync(io_context_, host, port);
         if (ret < 0) {
             LOG_ERROR(TAG, "Connect to host %s, port %s fail", host.c_str(), port.c_str());
             return SocketConnectError;
@@ -164,13 +165,10 @@ void Server::CloseChildInfoPipe() {
 }
 
 void Server::CheckChildrenDone() {
-    LOG_LINE();
     signal_.async_wait(
             [this](const std::error_code error, const int signal) {
                 // validate the parent proc
-                LOG_LINE();
                 if (acceptor_.is_open()) {
-                    LOG_LINE();
                     int status = 0;
                     pid_t pid;
                     if ((pid = waitpid(-1, &status, WNOHANG)) != 0) {
@@ -283,6 +281,8 @@ int Server::SetupCommands() {
 
     AddCommand("psync", PSyncCmd, CMD_READ);
 
+    AddCommand("wait", WaitCmd, CMD_READ);
+
     return 0;
 }
 
@@ -323,7 +323,6 @@ void Server::DoAccept() {
 
         DoAccept();
     });
-    LOG_LINE();
 }
 
 int Server::HandleFullResyncReply(const std::string &reply) {
@@ -416,5 +415,40 @@ void Server::AddBackLogBuffer(const std::string &data) {
         AppendDataBuffer(&backlog_, data);
         replication_info_.master_repl_offset += data.size();
     }
+}
+
+void Server::HeartbeatMechanism() {
+    if (!master_)
+        return;
+
+    /// async send ACK to its master
+    std::string msg = EncodeArr2RespArr({"REPLCONF", "ACK", std::to_string(replication_info_.repl_offset)});
+    LOG_DEBUG("Slave", "Prepare send ACK info to its master: %s", msg.c_str());
+    asio::async_write(master_->Socket(), asio::buffer(msg),
+                      [this](std::error_code ec, std::size_t /*length*/) {
+                          if (!ec) {
+                              LOG_DEBUG("Heartbeat", "Sent ACK done");
+                              // Schedule next write
+                              heartbeat_retry_ = 0;
+                              timer_.expires_after(std::chrono::milliseconds(replication_info_.heartbeat_interval_));
+                              timer_.async_wait([this](std::error_code ec) {
+                                  if (!ec) {
+                                      HeartbeatMechanism();
+                                  }
+                              });
+                          } else {
+                              LOG_ERROR("Heartbeat", "write error: %s, tried time %d", ec.message().c_str(),
+                                        heartbeat_retry_);
+                              ++heartbeat_retry_;
+                              if (heartbeat_retry_ < 5) {
+                                  timer_.expires_after(std::chrono::milliseconds(1000 * heartbeat_retry_));
+                                  timer_.async_wait([this](std::error_code ec) {
+                                      if (!ec) {
+                                          HeartbeatMechanism();
+                                      }
+                                  });
+                              }
+                          }
+                      });
 }
 

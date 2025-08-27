@@ -120,3 +120,9 @@ void showBinFile(const std::string& filename) {
 
     infile.close();
 }
+
+std::string EncodeRespInteger(const int n) {
+    resp::encoder<std::string> enc;
+    std::string resp_str = enc.encode_integer(std::to_string(n));
+    return resp_str;
+}

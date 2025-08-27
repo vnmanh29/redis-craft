@@ -55,11 +55,13 @@ typedef struct ReplicationInfo {
     int is_replica;
     std::string master_host;
     int master_port;
-    int64_t repl_offset;       /// <replica only>: offset of the replica server
+    int64_t repl_offset;              /// <replica only>: offset of the replica server
     ReplicationState replica_state;
+    uint heartbeat_interval_;         /// ms
 
     // default constructor
     ReplicationInfo() : role(Master), connected_slaves(0), master_repl_offset(0), is_replica(0),
+                        heartbeat_interval_(1000),
                         replica_state(ReplicationState::ReplStateNone) {
         master_replid = DEFAULT_MASTER_REPLID;
     }
@@ -73,6 +75,7 @@ private:
     int server_fd_;                                  /// the fd of redis server to listen all requests
     int replica_fd_;                                 /// <replica only>: the fd in replica server connect to the master server
     std::vector<std::shared_ptr<Client>> clients_;   /// list of clients connect to this redis server
+    std::shared_ptr<Client> master_;                 /// <replica only> point to its master server
 
     uint16_t port_;
 
@@ -86,10 +89,12 @@ private:
     std::unordered_map<std::string, RedisCmd *> global_commands_;
 
 
-    asio::io_context &io_context_;   /// asio io_context to handle async operations
+    asio::io_context &io_context_;      /// asio io_context to handle async operations
     asio::ip::tcp::acceptor acceptor_;  /// asio acceptor to handle incoming connections
-    tcp::socket replica_socket_;    /// <replica only>: socket in the replica server connect to the master
-    asio::signal_set signal_;   /// use to check the changing state of child process
+    tcp::socket replica_socket_;        /// <replica only>: socket in the replica server connect to the master
+    asio::signal_set signal_;           /// use to check the changing state of child process
+    asio::steady_timer timer_;          /// use for periodical action (like heartbeat mechanism)
+    int heartbeat_retry_;
 
     CircularBuffer backlog_;
 
@@ -178,6 +183,9 @@ public:
             return replication_info_.master_repl_offset;
         }
     }
+
+    /// period mechanism to the master
+    void HeartbeatMechanism();
 };
 
 

@@ -315,56 +315,49 @@ public:
 class ReplconfAckCommandExecutor : public AbstractInternalCommandExecutor {
 private:
     std::string GetResponse(const Query &query, std::shared_ptr<Client> client) {
-        LOG_LINE();
         std::string reply = RESP_OK;
 
-        if (query.cmd_args.empty()) {
-            return RESP_NIL;
-        } else if (query.cmd_args.size() == 1) {
-            return RESP_OK;
-        } else {
-            std::string arg1 = query.cmd_args[1];
-            std::string arg2 = query.cmd_args[2];
-            std::transform(arg1.begin(), arg1.end(), arg1.begin(), ::toupper);
-            if (arg1 == "GETACK") { /// from master send to slave
-                /// set it is master server
-                client->SetClientType(ClientType::TypeMaster);
-
-                SetFlags(MASTER_REPLY_SUPPORTED);
-
-                int64_t offset = Server::GetInstance()->GetServerOffset();
-
-                reply = EncodeArr2RespArr({"REPLCONF", "ACK", std::to_string(offset)});
-
-                LOG_DEBUG("REPL", "reply %s", reply.c_str());
-            } else if (arg1 == "LISTENING-PORT") { /// send from slave to master for psync cmd
-                /// set it become slave server
-                client->SetClientType(ClientType::TypeSlave);
-                client->SetSlaveState(SlaveState::WaitBGSaveStart);
-
-                SetFlags(SLAVE_REPLY_SUPPORTED);
-
-                /// TODO: handle arg2
-                reply = RESP_OK;
-            } else if (arg1 == "CAPA") { /// send from slave to master for psync
-                /// set it become slave server
-                client->SetClientType(ClientType::TypeSlave);
-                client->SetSlaveState(SlaveState::WaitBGSaveStart);
-
-                SetFlags(SLAVE_REPLY_SUPPORTED);
-                /// TODO: handle arg2
-                reply = RESP_OK;
-            }
-        }
         return reply;
     }
 
 public:
     void execute(const Query &query, std::shared_ptr<Client> client) override {
-        /// TODO: handle the argument
-        std::string response = GetResponse(query, client);
+        if (query.cmd_args.size() < 3) {
+            LOG_ERROR(TAG, "ReplconfAckCommandExecutor: Invalid number of arguments");
+            return;
+        } else {
+            std::string arg1 = query.cmd_args[1];
+            std::string arg2 = query.cmd_args[2];
+            std::transform(arg1.begin(), arg1.end(), arg1.begin(), ::toupper);
+            if (arg1 != "ACK") {
+                /// invalid args
+                LOG_ERROR(TAG, "ReplconfAckCommandExecutor: Invalid args");
+                return;
+            }
 
-        client->WriteAsync(response);
+            int offset = std::stoi(arg2);
+            auto prev_offset = client->GetSlavePrevOffset();
+
+            /// update the offset of slave
+            client->SetSlaveOffset(offset);
+            /// validate all client that in state WaitCmdBlocked
+            auto clients = Server::GetInstance()->GetClients();
+            for (auto &cli: clients) {
+                if (cli->SlaveState() == WaitCmdBlocked && cli->TargetOffset() <= offset &&
+                    cli->TargetOffset() > prev_offset) {
+                    /// this slave now become updated with cli
+                    int num_good_replicas = cli->GetNumGoodReplicas();
+                    ++num_good_replicas;
+                    if (num_good_replicas >= cli->GetMinGoodReplicas()) {
+                        /// enough good replica. Stop timer
+                        client->CancelWaiting();
+                    } else {
+                        /// update good replica
+                        client->SetNumGoodReplicas(num_good_replicas);
+                    }
+                }
+            }
+        }
     }
 };
 
@@ -437,6 +430,65 @@ class FullresyncCommandExecutor : public AbstractInternalCommandExecutor {
     }
 };
 
+class WaitCommandExecutor : public AbstractInternalCommandExecutor {
+    void execute(const Query &query, std::shared_ptr<Client> client) override {
+        if (query.cmd_args.size() < 3) {
+            LOG_ERROR("Client", "Invalid wait command");
+            return;
+        }
+
+        SetFlags(CLIENT_REPLY_SUPPORTED);
+        int min_good_replicas = std::stoi(query.cmd_args[1]);
+        int timeout = std::stoi(query.cmd_args[2]);
+        timeout = (timeout == 0) ? INT_MAX : timeout;
+
+        LOG_INFO("Client", "wait at least %d replica in %d", min_good_replicas, timeout);
+        if (min_good_replicas == 0) {
+            client->WriteAsync(EncodeRespInteger(0));
+            return;
+        }
+
+        int64_t master_offset = Server::GetInstance()->GetServerOffset();
+        int num_good_replicas = 0;
+
+        /// loop all its replicas to check their offset
+        auto clients = Server::GetInstance()->GetClients();
+        std::vector<std::shared_ptr<Client>> lag_replicas;
+        for (auto &cli: clients) {
+            if (cli->ClientType() == ClientType::TypeSlave) {
+                if (cli->GetSlaveOffset() >= master_offset) {
+                    ++num_good_replicas;
+                } else {
+                    lag_replicas.push_back(cli);
+                }
+            }
+        }
+
+        if (num_good_replicas >= min_good_replicas) {
+            /// already enough replicas, write response and return
+            client->WriteAsync(EncodeRespInteger(num_good_replicas));
+            return;
+        }
+
+        /// not enough good replicas. Block this client and set target offset
+        client->SetNumGoodReplicas(num_good_replicas);
+        client->SetMinGoodReplicas(min_good_replicas);
+        client->SetTargetOffset(master_offset);
+        client->SetSlaveState(WaitCmdBlocked);
+
+        /// send a GETACK command to all lag replicas to get their offset
+        if (min_good_replicas > 0) {
+            std::string getack_cmd = EncodeArr2RespArr({"REPLCONF", "GETACK", "*"});
+            for (auto &cli: lag_replicas) {
+                cli->WriteAsync(getack_cmd);
+            }
+        }
+
+        /// wait for reaching timeout
+        client->HandleWaitCommand(timeout);
+    }
+};
+
 class UnknownCommandExecutor : public AbstractInternalCommandExecutor {
     void execute(const Query &query, std::shared_ptr<Client> client) override {
 //        SetFlags(CLIENT_REPLY_SUPPORTED | MASTER_REPLY_SUPPORTED | SLAVE_REPLY_SUPPORTED);
@@ -475,6 +527,8 @@ AbstractInternalCommandExecutor::createCommandExecutor(const CommandType cmd_typ
             return std::make_shared<PSyncCommandExecutor>();
         case FullresyncCmd:
             return std::make_shared<FullresyncCommandExecutor>();
+        case WaitCmd:
+            return std::make_shared<WaitCommandExecutor>();
         default:
             std::cerr << "Unknown command type: " << cmd_type << std::endl;
             return std::make_shared<UnknownCommandExecutor>();
