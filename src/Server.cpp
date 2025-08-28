@@ -128,6 +128,8 @@ int Server::SyncWithMaster() {
         /// create a client presents for its master server
         master_ = Client::create(io_context_);
         master_->SetClientType(ClientType::TypeMaster);
+        master_->UnsetWriteFlags(APP_RECV);
+        master_->SetWriteFlags(MASTER_RECV);
 
         int ret = master_->ConnectAsync(io_context_, host, port);
         if (ret < 0) {
@@ -261,27 +263,27 @@ Server::AddCommand(const std::string &command, const std::string &subcmd, Comman
 
 int Server::SetupCommands() {
 
-    AddCommand("echo", EchoCmd, CMD_READ);
+    AddCommand("echo", EchoCmd, 0);
 
-    AddCommand("get", GetCmd, CMD_READ);
-    AddCommand("set", SetCmd, CMD_WRITE);
+    AddCommand("get", GetCmd, READ_CMD);
+    AddCommand("set", SetCmd, MASTER_SEND | SLAVE_RECV | WRITE_CMD | REPL_CMD);
 
-    AddCommand("ping", PingCmd, CMD_READ);
+    AddCommand("ping", PingCmd, MASTER_SEND | SLAVE_RECV);
 
-    AddCommand("config", "get", ConfigGetCmd, CMD_READ);
-    AddCommand("config", "set", ConfigSetCmd, CMD_WRITE);
+    AddCommand("config", "get", ConfigGetCmd, READ_CMD);
+    AddCommand("config", "set", ConfigSetCmd, WRITE_CMD);
 
-    AddCommand("keys", KeysCmd, CMD_READ);
-    AddCommand("info", InfoCmd, CMD_READ);
+    AddCommand("keys", KeysCmd, READ_CMD);
+    AddCommand("info", InfoCmd, READ_CMD);
 
-    AddCommand("replconf", "listening-port", ReplconfListeningPortCmd, CMD_READ);
-    AddCommand("replconf", "capa", ReplconfCapaCmd, CMD_READ);
-    AddCommand("replconf", "ack", ReplconfAckCmd, CMD_READ);
-    AddCommand("replconf", "getack", ReplconfGetackCmd, CMD_READ | CMD_REPLICATED);
+    AddCommand("replconf", "listening-port", ReplconfListeningPortCmd, READ_CMD);
+    AddCommand("replconf", "capa", ReplconfCapaCmd, READ_CMD);
+    AddCommand("replconf", "ack", ReplconfAckCmd, MASTER_RECV | SLAVE_SEND);
+    AddCommand("replconf", "getack", ReplconfGetackCmd, SLAVE_RECV | MASTER_SEND | REPL_CMD);
 
-    AddCommand("psync", PSyncCmd, CMD_READ);
+    AddCommand("psync", PSyncCmd, READ_CMD);
 
-    AddCommand("wait", WaitCmd, CMD_READ);
+    AddCommand("wait", WaitCmd, READ_CMD);
 
     return 0;
 }
@@ -313,10 +315,22 @@ void Server::DoAccept() {
     acceptor_.async_accept([this](const std::error_code &error, tcp::socket socket) {
         if (!error) {
             auto client = Client::CreateBindSocket(io_context_, std::move(socket));
-            LOG_INFO(TAG, "New connection, start receiving data from the client sock %d",
-                     client->Socket().native_handle());
-            clients_.push_back(client);
-            client->ReadAsync();
+            if (!client) {
+                LOG_ERROR(TAG, "Create client for new connection fail");
+            }
+            else {
+                if (replication_info_.role == ReplicationRole::Master) {                    
+                    client->SetWriteFlags(MASTER_SEND);
+                }
+                else if (replication_info_.role == ReplicationRole::Slave) {
+                    client->SetWriteFlags(SLAVE_SEND);
+                }
+                
+                LOG_INFO(TAG, "New connection, start receiving data from the client sock %d",
+                         client->Socket().native_handle());
+                clients_.push_back(client);
+                client->ReadAsync();                
+            }
         } else {
             LOG_ERROR("Asio", "Accept new connection fail %s", error.message().c_str());
         }
@@ -409,10 +423,12 @@ ssize_t Server::SaveRdbBackground(const std::string &file_name) {
 
 void Server::AddBackLogBuffer(const std::string &data) {
     if (replication_info_.is_replica) {
+        LOG_DEBUG(TAG, "Add %zu bytes to backlog buffer, but this server is a replica, ignore", data.size());
         /// only update offset, no need store backlog buffer
         replication_info_.repl_offset += data.size();
     } else {
         AppendDataBuffer(&backlog_, data);
+        LOG_DEBUG(TAG, "Add %zu bytes to backlog buffer, current size %zu", data.size(), backlog_.size);
         replication_info_.master_repl_offset += data.size();
     }
 }

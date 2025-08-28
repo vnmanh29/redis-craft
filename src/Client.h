@@ -24,10 +24,6 @@ enum SlaveState {
     WaitCmdBlocked = 3,
 };
 
-#define CLIENT_REPLY_SUPPORTED (1<<0)
-#define MASTER_REPLY_SUPPORTED (1<<1)
-#define SLAVE_REPLY_SUPPORTED (1<<2)
-
 enum ClientType {
     TypeRegular = (1 << 0),
     TypeMaster = (1 << 1),
@@ -57,7 +53,7 @@ public:
 
     void ReadAsync();
 
-    void WriteAsync(const std::string &reply);
+    void WriteAsync(const std::string &reply, int flags = 0);
 
     /// read data from tcp::socket and write to stream @param pfile .
     /// @param total_size: maximum size need to read from
@@ -72,6 +68,10 @@ public:
     int ClientType() const { return client_type_; }
 
     void SetClientType(int type) { client_type_ = type; }
+
+    void SetWriteFlags(int flag) { write_flags_ |= flag; }
+    
+    void UnsetWriteFlags(int flag) { write_flags_ &= (~flag); }
 
     int SlaveState() const { return slave_state_; }
 
@@ -113,7 +113,9 @@ private:
                                                 client_type_(TypeRegular),
                                                 slave_state_(SlaveState::SlaveOnline), file_(io_ctx),
                                                 received_fullresync_(false), start_pos_(0), rdb_file_size_(0),
-                                                rdb_read_size_(0), rdb_written_size_(0) {
+                                                rdb_read_size_(0), rdb_written_size_(0),
+                                                prev_repl_offset_(0), repl_offset_(0),
+                                                num_good_replicas_(0), min_good_replicas_(0), write_flags_(APP_RECV) {
         filename_ = get_rdb_file_path();
     }
 
@@ -125,7 +127,9 @@ private:
                                                                      file_(io_ctx), file_opened_(0),
                                                                      received_fullresync_(false), start_pos_(0),
                                                                      rdb_file_size_(0), rdb_read_size_(0),
-                                                                     rdb_written_size_(0) {
+                                                                     rdb_written_size_(0),
+                                                                     prev_repl_offset_(0), repl_offset_(0),
+                                                                     num_good_replicas_(0), min_good_replicas_(0), write_flags_(APP_RECV) {
         filename_ = get_rdb_file_path();
     }
 
@@ -183,6 +187,8 @@ private:
 
     int client_type_;
     int slave_state_;
+
+    int write_flags_;
 
     /// used when client is a replica server, the offset that replica has synced
     uint64_t repl_offset_, prev_repl_offset_;

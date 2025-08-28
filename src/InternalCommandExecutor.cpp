@@ -15,9 +15,7 @@ class EchoCommandExecutor : public AbstractInternalCommandExecutor {
 
         std::string response = enc.encode_bulk_str(query.cmd_args[1], query.cmd_args[1].size());
 
-        SetFlags(CLIENT_REPLY_SUPPORTED);
-
-        client->WriteAsync(response);
+        client->WriteAsync(response, APP_RECV | ALL_SEND);
     }
 };
 
@@ -49,9 +47,7 @@ private:
         if (response.empty())
             return;
 
-        SetFlags(CLIENT_REPLY_SUPPORTED);
-
-        client->WriteAsync(response);
+        client->WriteAsync(response, APP_RECV | MASTER_SEND | SLAVE_SEND);
     }
 };
 
@@ -121,9 +117,7 @@ public:
         if (response.empty())
             return;
 
-        SetFlags(CLIENT_REPLY_SUPPORTED);
-
-        client->WriteAsync(response);
+        client->WriteAsync(response, APP_RECV | MASTER_SEND);
     }
 
 };
@@ -135,9 +129,7 @@ class PingCommandExecutor : public AbstractInternalCommandExecutor {
 
         std::string response = RESP_PONG;
 
-        SetFlags(CLIENT_REPLY_SUPPORTED);// | MASTER_REPLY_SUPPORTED);
-//        SetFlags(CLIENT_REPLY_SUPPORTED);
-        client->WriteAsync(response);
+        client->WriteAsync(response, APP_RECV | MASTER_SEND | SLAVE_SEND);
     }
 };
 
@@ -173,9 +165,7 @@ public:
     void execute(const Query &query, std::shared_ptr<Client> client) override {
         std::string response = GetResponse(query);
 
-        SetFlags(CLIENT_REPLY_SUPPORTED);
-
-        client->WriteAsync(response);
+        client->WriteAsync(response, APP_RECV | ALL_SEND);
     }
 };
 
@@ -203,9 +193,7 @@ public:
     void execute(const Query &query, std::shared_ptr<Client> client) override {
         std::string response = GetResponse(query);
 
-        SetFlags(CLIENT_REPLY_SUPPORTED);
-
-        client->WriteAsync(response);
+        client->WriteAsync(response, APP_RECV | ALL_SEND);
     }
 
 };
@@ -234,9 +222,7 @@ public:
     void execute(const Query &query, std::shared_ptr<Client> client) override {
         std::string response = GetResponse(query);
 
-        SetFlags(CLIENT_REPLY_SUPPORTED);
-
-        client->WriteAsync(response);
+        client->WriteAsync(response, APP_RECV | ALL_SEND);
     }
 };
 
@@ -258,9 +244,10 @@ private:
             /// send from slave to master for psync cmd
             /// set it become slave server
             client->SetClientType(ClientType::TypeSlave);
-            client->SetSlaveState(SlaveState::WaitBGSaveStart);
+            client->UnsetWriteFlags(APP_RECV);
+            client->SetWriteFlags(SLAVE_RECV);
 
-            SetFlags(SLAVE_REPLY_SUPPORTED);
+            client->SetSlaveState(SlaveState::WaitBGSaveStart);
 
             /// TODO: handle arg2
             reply = RESP_OK;
@@ -273,7 +260,7 @@ public:
         /// TODO: handle the argument
         std::string response = GetResponse(query, client);
 
-        client->WriteAsync(response);
+        client->WriteAsync(response, SLAVE_RECV | MASTER_SEND);
     }
 };
 
@@ -294,9 +281,11 @@ private:
 
             /// set it become slave server
             client->SetClientType(ClientType::TypeSlave);
+            client->UnsetWriteFlags(APP_RECV);
+            client->SetWriteFlags(SLAVE_RECV);
+            
             client->SetSlaveState(SlaveState::WaitBGSaveStart);
 
-            SetFlags(SLAVE_REPLY_SUPPORTED);
             /// TODO: handle arg2
             reply = RESP_OK;
         }
@@ -308,7 +297,7 @@ public:
         /// TODO: handle the argument
         std::string response = GetResponse(query, client);
 
-        client->WriteAsync(response);
+        client->WriteAsync(response, SLAVE_RECV | MASTER_SEND);
     }
 };
 
@@ -348,12 +337,13 @@ public:
                     /// this slave now become updated with cli
                     int num_good_replicas = cli->GetNumGoodReplicas();
                     ++num_good_replicas;
+                    cli->SetNumGoodReplicas(num_good_replicas);
                     if (num_good_replicas >= cli->GetMinGoodReplicas()) {
                         /// enough good replica. Stop timer
-                        client->CancelWaiting();
+                        cli->CancelWaiting();
                     } else {
                         /// update good replica
-                        client->SetNumGoodReplicas(num_good_replicas);
+                        cli->SetNumGoodReplicas(num_good_replicas);
                     }
                 }
             }
@@ -376,8 +366,6 @@ private:
                 /// set it is master server
                 client->SetClientType(ClientType::TypeMaster);
 
-                SetFlags(MASTER_REPLY_SUPPORTED);
-
                 int64_t offset = Server::GetInstance()->GetServerOffset();
 
                 reply = EncodeArr2RespArr({"REPLCONF", "ACK", std::to_string(offset)});
@@ -393,7 +381,7 @@ public:
         /// TODO: handle the argument
         std::string response = GetResponse(query, client);
 
-        client->WriteAsync(response);
+        client->WriteAsync(response, MASTER_RECV | SLAVE_SEND);
     }
 };
 
@@ -407,12 +395,11 @@ class PSyncCommandExecutor : public AbstractInternalCommandExecutor {
         std::string rdb_file = Database::GetInstance()->GetRdbPath();
 
         /// psync command supports responds to slave
-        SetFlags(SLAVE_REPLY_SUPPORTED);
 
         /// Case 1: full sync
         std::string response = EncodeRespSimpleStr("FULLRESYNC " + master_repid + " " + master_repl_offset);
 
-        client->WriteAsync(response);
+        client->WriteAsync(response, SLAVE_RECV | MASTER_SEND);
 
         client->SetSlaveState(SlaveState::WaitBGSaveEnd);
 
@@ -437,14 +424,13 @@ class WaitCommandExecutor : public AbstractInternalCommandExecutor {
             return;
         }
 
-        SetFlags(CLIENT_REPLY_SUPPORTED);
         int min_good_replicas = std::stoi(query.cmd_args[1]);
         int timeout = std::stoi(query.cmd_args[2]);
         timeout = (timeout == 0) ? INT_MAX : timeout;
 
         LOG_INFO("Client", "wait at least %d replica in %d", min_good_replicas, timeout);
         if (min_good_replicas == 0) {
-            client->WriteAsync(EncodeRespInteger(0));
+            client->WriteAsync(EncodeRespInteger(0), APP_RECV | MASTER_SEND);
             return;
         }
 
@@ -466,7 +452,7 @@ class WaitCommandExecutor : public AbstractInternalCommandExecutor {
 
         if (num_good_replicas >= min_good_replicas) {
             /// already enough replicas, write response and return
-            client->WriteAsync(EncodeRespInteger(num_good_replicas));
+            client->WriteAsync(EncodeRespInteger(num_good_replicas), APP_RECV | MASTER_SEND);
             return;
         }
 
@@ -480,7 +466,7 @@ class WaitCommandExecutor : public AbstractInternalCommandExecutor {
         if (min_good_replicas > 0) {
             std::string getack_cmd = EncodeArr2RespArr({"REPLCONF", "GETACK", "*"});
             for (auto &cli: lag_replicas) {
-                cli->WriteAsync(getack_cmd);
+                cli->WriteAsync(getack_cmd, SLAVE_RECV | MASTER_SEND);
             }
         }
 
@@ -491,10 +477,10 @@ class WaitCommandExecutor : public AbstractInternalCommandExecutor {
 
 class UnknownCommandExecutor : public AbstractInternalCommandExecutor {
     void execute(const Query &query, std::shared_ptr<Client> client) override {
-//        SetFlags(CLIENT_REPLY_SUPPORTED | MASTER_REPLY_SUPPORTED | SLAVE_REPLY_SUPPORTED);
-        SetFlags(CLIENT_REPLY_SUPPORTED);
+
         /// FIXME: handle with unknown command
-        client->WriteAsync(RESP_OK);
+        LOG_INFO("Client", "Unknown command");
+        client->WriteAsync(RESP_OK, APP_RECV | ALL_SEND);
     }
 };
 

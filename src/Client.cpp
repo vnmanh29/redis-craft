@@ -31,21 +31,25 @@ void Client::ReadAsync() {
                           });
 }
 
-void Client::WriteAsync(const std::string &reply) {
-    LOG_INFO("Client", "write reply %s, sock %d, client type %d, executor flags %d", reply.c_str(),
-             sock_.native_handle(), client_type_, executor_.Flags());
-    /// no need to reply to master server
+void Client::WriteAsync(const std::string &reply, int flags) {
+    // LOG_INFO("Client", "write reply %s, sock %d, write_flags %d, flags %d", reply.c_str(),
+    //          sock_.native_handle(), write_flags_, flags);
+    
+    /// only write when write_flags_ is subset of flags
     /// FIXME: more details
-    if (!(client_type_ & executor_.Flags()))
+    if ((write_flags_ & flags) != write_flags_) {
+        LOG_ERROR("Client", "skip write reply %s, sock %d, write_flags %d, flags %d, continue readAsync", reply.c_str(),
+                 sock_.native_handle(), write_flags_, flags);
+        ReadAsync();
         return;
+    }
 
-    LOG_DEBUG("Client", "write reply %s, sock %d, client type %d", reply.c_str(), sock_.native_handle(), client_type_);
-    sock_.async_write_some(asio::buffer(reply), [&reply](const std::error_code &error, const size_t byte_transferred) {
-        if (error) {
-            LOG_ERROR(TAG, "Send reply %s fail %d: %s", reply.c_str(), error.value(), error.message().c_str());
-            return;
+    LOG_INFO("Client", "write reply %s, sock %d, client type %d", reply.c_str(), sock_.native_handle(), client_type_);
+    sock_.async_write_some(asio::buffer(reply), [reply](const std::error_code &error, const size_t byte_transferred) {
+        if (!error) {
+            LOG_INFO("WriteAsync", "complete write %s, transferred %zu bytes socket", reply.c_str(), byte_transferred);
         } else {
-            LOG_LINE();
+            LOG_ERROR(TAG, "Send reply %s fail %d: %s", reply.c_str(), error.value(), error.message().c_str());
         }
     });
 }
@@ -529,12 +533,22 @@ void Client::ReadFile2Buffer() {
 }
 
 void Client::HandleWaitCommand(const int timeout) {
+    LOG_INFO("Client", "Wait in %d ms", timeout);
     auto self(shared_from_this());
+    timer_.expires_after(std::chrono::milliseconds (timeout));
     timer_.async_wait([this, self](const std::error_code& ec) {
         if (!ec || ec == asio::error::operation_aborted) {
-            LOG_DEBUG("Client", "Finish waiting ");
+            LOG_INFO("Client", "Finish waiting, current goog_replica %d", num_good_replicas_);
             std::string msg = EncodeRespInteger(num_good_replicas_);
-            WriteAsync(msg);
+
+            /// reset before responding WAIT command
+            SetNumGoodReplicas(0);
+            SetMinGoodReplicas(0);
+            SetTargetOffset(0);
+            SetSlaveState(SlaveOnline);
+
+            /// only respond to regular client
+            WriteAsync(msg, APP_RECV | MASTER_SEND);
         }
         else {
             LOG_ERROR("Client", "Wait end with error %s", ec.message().c_str());

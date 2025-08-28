@@ -37,7 +37,7 @@ int CommandExecutor::ReceiveDataAndExecute(const std::string &buffer, std::share
         if (ret < 0) {
             LOG_ERROR(TAG, "NOT found the suitable cmd, err %d", ret);
 #if HARDCODE
-            query_.cmd = new RedisCmd(UnknownCmd, CMD_READ);
+            query_.cmd = new RedisCmd(UnknownCmd, READ_CMD | APP_RECV);
 #else // HARDCODE
             return ret;
 #endif // HARDCODE
@@ -47,7 +47,7 @@ int CommandExecutor::ReceiveDataAndExecute(const std::string &buffer, std::share
 
         if (client->ClientType() == ClientType::TypeMaster) {
             /// this command was propagated from its master, so it is replicated command
-            query_.flags |= CMD_REPLICATED;
+            query_.flags |= REPL_CMD;
         }
 
         ret = BuildExecutor();
@@ -59,13 +59,12 @@ int CommandExecutor::ReceiveDataAndExecute(const std::string &buffer, std::share
 
         /// execute the current command, fill the response to the output buffer of client
         internal_executor_->execute(query_, client);
-        LOG_DEBUG("", "data %s, offset %lu", data_.c_str(), offset);
         /// increase the offset in the next decoding
         offset += res.size();
-        LOG_DEBUG("", "remain data %s", data_.c_str());
+        LOG_DEBUG("Executor", "remain data %s", data_.c_str());
 
         /// propagate this command to the slaves if need to propagate this command
-        int need_propagate = ((query_.flags & CMD_WRITE) | (query_.flags & CMD_REPLICATED)) ? 1 : 0;
+        int need_propagate = ((query_.flags & WRITE_CMD) | (query_.flags & REPL_CMD)) ? 1 : 0;
 
         /// first, encode the command to a list of RESP string
         std::vector<std::string> resp_arr = encoder_.encode_arr(query_.cmd_args);
@@ -77,7 +76,7 @@ int CommandExecutor::ReceiveDataAndExecute(const std::string &buffer, std::share
         }
 
         /// update offset
-        if (client->ClientType() == TypeMaster || need_propagate)
+        if (need_propagate || client->ClientType() == TypeMaster)
             Server::GetInstance()->AddBackLogBuffer(resp_data);
 
         /// move next loop if this cmd no need to propagate
@@ -90,14 +89,16 @@ int CommandExecutor::ReceiveDataAndExecute(const std::string &buffer, std::share
 
         /// third, loop and fill entire resp_data to output buffer of slaves
         auto clients = Server::GetInstance()->GetClients();
+        LOG_DEBUG(TAG, "There are %lu clients of this server", clients.size());
         for (const auto &cli: clients) {
             if (cli->ClientType() == ClientType::TypeSlave) {
                 /// FIXME: handle case copy the resp_data to output buffer fail
-                LOG_DEBUG(TAG, "send %s through sock %d", resp_data.c_str(), cli->Socket().native_handle());
-                cli->WriteAsync(resp_data);
+                LOG_DEBUG(TAG, "Propagate command %s through sock %d", resp_data.c_str(), cli->Socket().native_handle());
+                cli->WriteAsync(resp_data, MASTER_SEND | SLAVE_RECV);
             }
         }
     }
+    
     data_ = data_.substr(offset);
 
     return 0;

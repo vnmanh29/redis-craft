@@ -17,10 +17,19 @@
 #define DEFAULT_MASTER_REPLID "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
 #define MASTER_ID_LENGTH 40
 
-#define CMD_UNKNOWN       (1<<0)
-#define CMD_WRITE         (1<<1)
-#define CMD_READ          (1<<2)
-#define CMD_REPLICATED    (1<<3)
+
+#define MASTER_SEND (1<<0)
+#define SLAVE_SEND  (1<<1)
+#define ALL_SEND    (MASTER_SEND | SLAVE_SEND)
+#define MASTER_RECV (1<<2)
+#define SLAVE_RECV  (1<<3)
+#define APP_RECV    (1<<4)
+#define ALL_RECV    (MASTER_RECV | SLAVE_RECV | APP_RECV)
+#define ALL_DIR     (ALL_SEND | ALL_RECV)
+#define WRITE_CMD   (1<<5)
+#define READ_CMD    (1<<6)
+#define REPL_CMD    (1<<7)
+
 
 enum CommandType {
     EchoCmd = 0,
@@ -51,7 +60,7 @@ typedef struct RedisCmd {
 
 typedef struct Query {
     RedisCmd* cmd;    /// point to the global cmd
-    uint64_t flags;   /// flag of cmd, like CMD_READ, CMD_WRITE, etc ...
+    uint64_t flags;   /// flag of cmd, like MASTER_SEND, SLAVE_REVC, etc ...
     std::vector<std::string> cmd_args;      /// the list argv for execution
 } Query;
 

@@ -29,14 +29,6 @@ public:
 
     static std::shared_ptr<AbstractInternalCommandExecutor> createCommandExecutor(CommandType cmd_type);
 
-    inline void SetFlags(const int flags) {
-        flags_ |= flags;
-    }
-
-    inline int GetFlags() const {
-        return flags_;
-    }
-
 };
 
 #endif //REDIS_STARTER_CPP_INTERNALCOMMANDEXECUTOR_H

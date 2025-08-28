@@ -27,8 +27,6 @@ public:
     /// One by one, try to decode a command from buffer, execute it utils could not decode new command
     int ReceiveDataAndExecute(const std::string &buffer, std::shared_ptr<Client> client);
 
-    int Flags() const { return internal_executor_->GetFlags(); }
-
 private:
     /// private method
     int BuildRedisCommand(const resp::unique_value &rep);

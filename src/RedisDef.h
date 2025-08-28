@@ -46,7 +46,7 @@ extern const char TAG[];
 
 #define LOG_INFO(LABEL, fmt, ...) {                     \
     if (global_log_level >= LogLevel::Info) {           \
-        printf("\033[32m[%s] " fmt "\033[0m\n", LABEL, ##__VA_ARGS__); \
+        printf("\033[32m[%s]:%d " fmt "\033[0m\n", LABEL, __LINE__, ##__VA_ARGS__); \
         fflush(stdout);                                 \
     }                                                   \
 }
