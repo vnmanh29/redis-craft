@@ -101,7 +101,7 @@ void hexToBinaryData(const std::string &hexStr, std::vector<unsigned char> &bina
     }
 }
 
-void showBinFile(const std::string& filename) {
+void showBinFile(const std::string &filename) {
     // Open the file in binary mode
     std::ifstream infile(filename, std::ios_base::binary);
 
@@ -112,7 +112,7 @@ void showBinFile(const std::string& filename) {
 
     // Read and display bytes in hexadecimal
     unsigned char byte;
-    while (infile.read(reinterpret_cast<char*>(&byte), 1)) {
+    while (infile.read(reinterpret_cast<char *>(&byte), 1)) {
         std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned short>(byte) << "";
     }
 

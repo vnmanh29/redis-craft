@@ -25,19 +25,19 @@ private:
         std::string response;
 
         if (query.cmd_args.size() < 2) {
-            LOG_ERROR(TAG, "GetCommandExecutor: Invalid number of arguments")
+            LOG_ERROR(EXECUTOR, "GetCommandExecutor: Invalid number of arguments")
             return "";
         }
 
         std::string resp = Database::GetInstance()->RetrieveValueOfKey(query.cmd_args[1]);
 
         if (resp.empty()) {
-            LOG_ERROR(TAG, "GetCommandExecutor: Key %s not found", query.cmd_args[1].c_str());
+            LOG_ERROR(EXECUTOR, "GetCommandExecutor: Key %s not found", query.cmd_args[1].c_str());
             return "$-1\r\n"; // RESP format for nil
         } else {
             resp::encoder<std::string> encoder;
             auto s = encoder.encode_bulk_str(resp, resp.size());
-            LOG_DEBUG(TAG, "Get key %s, val %s\n", query.cmd_args[1].c_str(), s.c_str());
+            LOG_DEBUG(EXECUTOR, "Get key %s, val %s\n", query.cmd_args[1].c_str(), s.c_str());
             return s;
         }
     }
@@ -283,7 +283,7 @@ private:
             client->SetClientType(ClientType::TypeSlave);
             client->UnsetWriteFlags(APP_RECV);
             client->SetWriteFlags(SLAVE_RECV);
-            
+
             client->SetSlaveState(SlaveState::WaitBGSaveStart);
 
             /// TODO: handle arg2
@@ -312,7 +312,7 @@ private:
 public:
     void execute(const Query &query, std::shared_ptr<Client> client) override {
         if (query.cmd_args.size() < 3) {
-            LOG_ERROR(TAG, "ReplconfAckCommandExecutor: Invalid number of arguments");
+            LOG_ERROR(EXECUTOR, "ReplconfAckCommandExecutor: Invalid number of arguments");
             return;
         } else {
             std::string arg1 = query.cmd_args[1];
@@ -320,7 +320,7 @@ public:
             std::transform(arg1.begin(), arg1.end(), arg1.begin(), ::toupper);
             if (arg1 != "ACK") {
                 /// invalid args
-                LOG_ERROR(TAG, "ReplconfAckCommandExecutor: Invalid args");
+                LOG_ERROR(EXECUTOR, "ReplconfAckCommandExecutor: Invalid args");
                 return;
             }
 
@@ -420,7 +420,7 @@ class FullresyncCommandExecutor : public AbstractInternalCommandExecutor {
 class WaitCommandExecutor : public AbstractInternalCommandExecutor {
     void execute(const Query &query, std::shared_ptr<Client> client) override {
         if (query.cmd_args.size() < 3) {
-            LOG_ERROR("Client", "Invalid wait command");
+            LOG_ERROR(EXECUTOR, "Invalid wait command");
             return;
         }
 
@@ -428,7 +428,7 @@ class WaitCommandExecutor : public AbstractInternalCommandExecutor {
         int timeout = std::stoi(query.cmd_args[2]);
         timeout = (timeout == 0) ? INT_MAX : timeout;
 
-        LOG_INFO("Client", "wait at least %d replica in %d", min_good_replicas, timeout);
+        LOG_INFO(EXECUTOR, "wait at least %d replica in %d", min_good_replicas, timeout);
         if (min_good_replicas == 0) {
             client->WriteAsync(EncodeRespInteger(0), APP_RECV | MASTER_SEND);
             return;
@@ -475,11 +475,31 @@ class WaitCommandExecutor : public AbstractInternalCommandExecutor {
     }
 };
 
+class TypeCommandExecutor : public AbstractInternalCommandExecutor {
+    void execute(const Query &query, std::shared_ptr<Client> client) override {
+        if (query.cmd_args.size() < 2) {
+            LOG_ERROR(EXECUTOR, "Invalid argc of command Type");
+            return;
+        }
+
+        std::string arg1 = query.cmd_args[1];
+        std::string reply = RESP_NONE;
+        
+        if (Database::GetInstance()->IsKeyExist(arg1)) {
+            reply = "+string\r\n";
+        } else {
+            reply = RESP_NONE;
+        }
+
+        client->WriteAsync(reply, APP_RECV | ALL_SEND);
+    }
+};
+
 class UnknownCommandExecutor : public AbstractInternalCommandExecutor {
     void execute(const Query &query, std::shared_ptr<Client> client) override {
 
         /// FIXME: handle with unknown command
-        LOG_INFO("Client", "Unknown command");
+        LOG_INFO(EXECUTOR, "Unknown command");
         client->WriteAsync(RESP_OK, APP_RECV | ALL_SEND);
     }
 };
@@ -515,6 +535,8 @@ AbstractInternalCommandExecutor::createCommandExecutor(const CommandType cmd_typ
             return std::make_shared<FullresyncCommandExecutor>();
         case WaitCmd:
             return std::make_shared<WaitCommandExecutor>();
+        case TypeCmd:
+            return std::make_shared<TypeCommandExecutor>();
         default:
             std::cerr << "Unknown command type: " << cmd_type << std::endl;
             return std::make_shared<UnknownCommandExecutor>();

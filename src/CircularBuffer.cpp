@@ -4,6 +4,6 @@
 
 #include "CircularBuffer.h"
 
-void AppendDataBuffer(CircularBuffer* buffer, const std::string& s) {
+void AppendDataBuffer(CircularBuffer *buffer, const std::string &s) {
     buffer->data += s;
 }

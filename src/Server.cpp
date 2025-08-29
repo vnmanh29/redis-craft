@@ -284,6 +284,8 @@ int Server::SetupCommands() {
     AddCommand("psync", PSyncCmd, READ_CMD);
 
     AddCommand("wait", WaitCmd, READ_CMD);
+    
+    AddCommand("type", TypeCmd, READ_CMD);
 
     return 0;
 }
@@ -317,19 +319,17 @@ void Server::DoAccept() {
             auto client = Client::CreateBindSocket(io_context_, std::move(socket));
             if (!client) {
                 LOG_ERROR(TAG, "Create client for new connection fail");
-            }
-            else {
-                if (replication_info_.role == ReplicationRole::Master) {                    
+            } else {
+                if (replication_info_.role == ReplicationRole::Master) {
                     client->SetWriteFlags(MASTER_SEND);
-                }
-                else if (replication_info_.role == ReplicationRole::Slave) {
+                } else if (replication_info_.role == ReplicationRole::Slave) {
                     client->SetWriteFlags(SLAVE_SEND);
                 }
-                
+
                 LOG_INFO(TAG, "New connection, start receiving data from the client sock %d",
                          client->Socket().native_handle());
                 clients_.push_back(client);
-                client->ReadAsync();                
+                client->ReadAsync();
             }
         } else {
             LOG_ERROR("Asio", "Accept new connection fail %s", error.message().c_str());

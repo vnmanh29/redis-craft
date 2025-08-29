@@ -34,12 +34,12 @@ void Client::ReadAsync() {
 void Client::WriteAsync(const std::string &reply, int flags) {
     // LOG_INFO("Client", "write reply %s, sock %d, write_flags %d, flags %d", reply.c_str(),
     //          sock_.native_handle(), write_flags_, flags);
-    
+
     /// only write when write_flags_ is subset of flags
     /// FIXME: more details
     if ((write_flags_ & flags) != write_flags_) {
         LOG_ERROR("Client", "skip write reply %s, sock %d, write_flags %d, flags %d, continue readAsync", reply.c_str(),
-                 sock_.native_handle(), write_flags_, flags);
+                  sock_.native_handle(), write_flags_, flags);
         ReadAsync();
         return;
     }
@@ -535,8 +535,8 @@ void Client::ReadFile2Buffer() {
 void Client::HandleWaitCommand(const int timeout) {
     LOG_INFO("Client", "Wait in %d ms", timeout);
     auto self(shared_from_this());
-    timer_.expires_after(std::chrono::milliseconds (timeout));
-    timer_.async_wait([this, self](const std::error_code& ec) {
+    timer_.expires_after(std::chrono::milliseconds(timeout));
+    timer_.async_wait([this, self](const std::error_code &ec) {
         if (!ec || ec == asio::error::operation_aborted) {
             LOG_INFO("Client", "Finish waiting, current goog_replica %d", num_good_replicas_);
             std::string msg = EncodeRespInteger(num_good_replicas_);
@@ -549,8 +549,7 @@ void Client::HandleWaitCommand(const int timeout) {
 
             /// only respond to regular client
             WriteAsync(msg, APP_RECV | MASTER_SEND);
-        }
-        else {
+        } else {
             LOG_ERROR("Client", "Wait end with error %s", ec.message().c_str());
         }
     });

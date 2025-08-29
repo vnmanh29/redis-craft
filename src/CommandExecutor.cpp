@@ -93,12 +93,13 @@ int CommandExecutor::ReceiveDataAndExecute(const std::string &buffer, std::share
         for (const auto &cli: clients) {
             if (cli->ClientType() == ClientType::TypeSlave) {
                 /// FIXME: handle case copy the resp_data to output buffer fail
-                LOG_DEBUG(TAG, "Propagate command %s through sock %d", resp_data.c_str(), cli->Socket().native_handle());
+                LOG_DEBUG(TAG, "Propagate command %s through sock %d", resp_data.c_str(),
+                          cli->Socket().native_handle());
                 cli->WriteAsync(resp_data, MASTER_SEND | SLAVE_RECV);
             }
         }
     }
-    
+
     data_ = data_.substr(offset);
 
     return 0;

@@ -70,7 +70,7 @@ public:
     void SetClientType(int type) { client_type_ = type; }
 
     void SetWriteFlags(int flag) { write_flags_ |= flag; }
-    
+
     void UnsetWriteFlags(int flag) { write_flags_ &= (~flag); }
 
     int SlaveState() const { return slave_state_; }
@@ -129,7 +129,8 @@ private:
                                                                      rdb_file_size_(0), rdb_read_size_(0),
                                                                      rdb_written_size_(0),
                                                                      prev_repl_offset_(0), repl_offset_(0),
-                                                                     num_good_replicas_(0), min_good_replicas_(0), write_flags_(APP_RECV) {
+                                                                     num_good_replicas_(0), min_good_replicas_(0),
+                                                                     write_flags_(APP_RECV) {
         filename_ = get_rdb_file_path();
     }
 

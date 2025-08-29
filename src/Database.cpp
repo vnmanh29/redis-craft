@@ -58,7 +58,7 @@ std::string Database::RetrieveValueOfKey(const std::string &key) {
     }
 }
 
-int Database::SetConfig(RedisConfig* cfg) {
+int Database::SetConfig(RedisConfig *cfg) {
     rdb_cfg_ = cfg;
 
     /// Onload new config
@@ -123,6 +123,11 @@ std::vector<std::string> Database::RetrieveKeysMatchPattern(const std::string &p
     }
 
     return matched_keys;
+}
+
+bool Database::IsKeyExist(const std::string &key) {
+    std::lock_guard lock(m_);
+    return table_.find(key) != table_.end();
 }
 
 bool Database::IsEqualConfig(const std::shared_ptr<RedisConfig> &cfg) const {

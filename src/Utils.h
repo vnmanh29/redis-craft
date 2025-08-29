@@ -47,6 +47,7 @@ enum CommandType {
     PSyncCmd,
     FullresyncCmd,
     WaitCmd,
+    TypeCmd,
     UnknownCmd
 };
 
@@ -59,7 +60,7 @@ typedef struct RedisCmd {
 } RedisCmd;
 
 typedef struct Query {
-    RedisCmd* cmd;    /// point to the global cmd
+    RedisCmd *cmd;    /// point to the global cmd
     uint64_t flags;   /// flag of cmd, like MASTER_SEND, SLAVE_REVC, etc ...
     std::vector<std::string> cmd_args;      /// the list argv for execution
 } Query;

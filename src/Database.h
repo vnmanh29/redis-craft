@@ -24,7 +24,7 @@ private:
     int version_;
     static std::mutex m_;
 
-    RedisConfig* rdb_cfg_;
+    RedisConfig *rdb_cfg_;
 
 private:
     bool IsEqualConfig(const std::shared_ptr<RedisConfig> &cfg) const;
@@ -38,7 +38,7 @@ public:
 
     int Reset();
 
-    int SetConfig(RedisConfig* cfg);
+    int SetConfig(RedisConfig *cfg);
 
     std::string GetConfigFromName(const std::string &property);
 
@@ -47,6 +47,8 @@ public:
     std::string RetrieveValueOfKey(const std::string &key);
 
     std::vector<std::string> RetrieveKeysMatchPattern(const std::string &pattern);
+
+    bool IsKeyExist(const std::string &key);
     
     [[nodiscard]] std::string GetRdbPath() const;
 

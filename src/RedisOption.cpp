@@ -8,7 +8,7 @@
 #include <sstream>
 #include <iostream>
 
-extern RedisConfig* globale_cfg;
+extern RedisConfig *globale_cfg;
 
 static int opt_dir(RedisConfig *redis_cfg, const char *arg) {
     if (redis_cfg) {
@@ -85,8 +85,7 @@ const RedisOptionDef *find_redis_option(const RedisOptionDef *options, const cha
     return options;
 }
 
-std::string get_rdb_file_path()
-{
+std::string get_rdb_file_path() {
     if (globale_cfg) {
         std::string deliminator = (!globale_cfg->dir_path.empty() && globale_cfg->dir_path.back() == '/') ? "" : "/";
         return globale_cfg->dir_path + deliminator + globale_cfg->dbfilename;

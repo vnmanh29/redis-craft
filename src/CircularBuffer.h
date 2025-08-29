@@ -14,6 +14,6 @@ typedef struct CircularBuffer {
     std::string data;
 } CircularBuffer;
 
-void AppendDataBuffer(CircularBuffer* buffer, const std::string& s);
+void AppendDataBuffer(CircularBuffer *buffer, const std::string &s);
 
 #endif //REDIS_CRAFT_CIRCULARBUFFER_H

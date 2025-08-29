@@ -10,6 +10,8 @@
 
 #define ZDEBUG 0
 
+#define EXECUTOR "Executor"
+
 enum struct LogLevel {
     Silent = 0,
     Error = 1,
@@ -23,6 +25,7 @@ enum struct LogLevel {
 #define RESP_PONG "+PONG\r\n"
 #define RESP_OK "+OK\r\n"
 #define RESP_NIL "$-1\r\n"
+#define RESP_NONE "+none\r\n"
 #define RESP_FULLRESYNC "+FULLRESYNC"
 
 extern LogLevel global_log_level;

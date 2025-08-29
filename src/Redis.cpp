@@ -10,11 +10,11 @@
 #include "RedisDef.h"
 
 LogLevel global_log_level = LogLevel::Silent;
-RedisConfig* globale_cfg = nullptr;
+RedisConfig *globale_cfg = nullptr;
 
 const char TAG[] = "RDB";
 
-static int redis_parse_options(int argc, char **argv, RedisConfig* cfg) {
+static int redis_parse_options(int argc, char **argv, RedisConfig *cfg) {
     int idx = 1;
     while (idx < argc) {
         char *arg = argv[idx];
@@ -79,8 +79,7 @@ int main(int argc, char **argv) {
 
     Server::GetInstance()->Setup();
 
-    if (globale_cfg->is_replica)
-    {
+    if (globale_cfg->is_replica) {
         Server::GetInstance()->StartReplica();
     } else {
         Server::GetInstance()->StartMaster();
