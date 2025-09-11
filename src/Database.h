@@ -15,6 +15,7 @@
 
 class Database {
 private:
+    using VString = std::vector<std::string>;
 
     static Database *instance_;
 
@@ -46,10 +47,14 @@ public:
 
     std::string RetrieveValueOfKey(const std::string &key);
 
+    int XAdd(const VString &argv, std::string &entry_id);
+
     std::vector<std::string> RetrieveKeysMatchPattern(const std::string &pattern);
 
     bool IsKeyExist(const std::string &key);
-    
+
+    std::string GetKeyType(const std::string &key);
+
     [[nodiscard]] std::string GetRdbPath() const;
 
     int LoadPersistentDb();

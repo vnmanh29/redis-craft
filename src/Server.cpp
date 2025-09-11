@@ -284,8 +284,9 @@ int Server::SetupCommands() {
     AddCommand("psync", PSyncCmd, READ_CMD);
 
     AddCommand("wait", WaitCmd, READ_CMD);
-    
+
     AddCommand("type", TypeCmd, READ_CMD);
+    AddCommand("xadd", XAddCmd, READ_CMD);
 
     return 0;
 }

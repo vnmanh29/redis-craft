@@ -48,6 +48,7 @@ enum CommandType {
     FullresyncCmd,
     WaitCmd,
     TypeCmd,
+    XAddCmd,
     UnknownCmd
 };
 

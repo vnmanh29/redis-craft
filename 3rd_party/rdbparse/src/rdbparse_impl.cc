@@ -2,6 +2,8 @@
 #include <iostream>
 #include <list>
 #include <set>
+#include <sstream>
+#include <chrono>
 
 #include "rdbparse_impl.h"
 #include "include/rdbparse.h"
@@ -757,5 +759,44 @@ int RdbParseImpl::GetVersion() {
     return version_;
 }
 
+static std::string GetEntryStreamId(const std::string& id, const std::string& pre_entry_id) {
+  if (id == "*") {
+    /// case auto-generate
+    long long now = std::chrono::duration_cast<std::chrono::seconds> (std::chrono::system_clock::now().time_since_epoch()).count();
+    std::stringstream ss;
+    ss << now << "-0";
+    return ss.str();
+  }
+
+  return id;
+}
+
+int ParsedResult::AddStream(const std::vector<std::string>& data, std::string& entry_id)
+{
+  /// validate input
+  if (data.size() < 1 || (data.size() % 2 == 0)) {
+    return -1;
+  }
+
+  std::string prev_entry_id;
+  if (!stream.empty()) {
+    prev_entry_id = stream.rbegin()->first;
+  }
+
+  std::string id = data[2];    
+  
+  /// get new entry_id
+  entry_id = GetEntryStreamId(id, prev_entry_id);
+
+  /// build entry_stream
+  EntryStream ent;
+  for (int i = 3;i + 1 < data.size(); ++i) {
+    ent.key_vals.push_back({data[i], data[i+1]});
+  }
+
+  stream.insert({entry_id, std::move(ent)});
+
+  return 0;
+}
 
 } // namespace RdbParser

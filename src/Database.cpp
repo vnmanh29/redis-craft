@@ -38,6 +38,23 @@ void Database::SetKeyVal(const std::string &key, const std::string &val, int on_
     table_[key] = std::make_shared<RdbParser::ParsedResult>(key, val, expired_ts);
 }
 
+int Database::XAdd(const VString &argv, std::string &entry_id) {
+    std::string stream_key = argv[1];
+
+    if (table_.find(stream_key) == table_.end()) {
+        auto stream = std::make_shared<RdbParser::ParsedResult>("stream");
+        table_[stream_key] = stream;
+    }
+
+    int ret = table_[stream_key]->AddStream(argv, entry_id);
+    if (ret < 0) {
+        LOG_ERROR("Stream", "Add stream fail");
+        return ret;
+    }
+
+    return 0;
+}
+
 std::string Database::RetrieveValueOfKey(const std::string &key) {
     std::lock_guard lock(m_);
     try {
@@ -87,7 +104,6 @@ int Database::SetConfig(RedisConfig *cfg) {
                 break;
             }
             RdbParser::ParsedResult *value = parse->Value();
-            // value->Debug();
             std::string key = value->key;
             if (key.empty()) {
                 continue; // skip empty keys
@@ -130,6 +146,17 @@ bool Database::IsKeyExist(const std::string &key) {
     return table_.find(key) != table_.end();
 }
 
+std::string Database::GetKeyType(const std::string &key) {
+    try {
+        auto &val = table_.at(key);
+        return val->type;
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("DB", "Not found key %s, ex %s", key.c_str(), e.what());
+        return "none";
+    }
+}
+
 bool Database::IsEqualConfig(const std::shared_ptr<RedisConfig> &cfg) const {
     if (!rdb_cfg_ && cfg) {
         return false;
@@ -168,4 +195,3 @@ int Database::LoadPersistentDb() {
     /// 3. TODO: load data to memory
     return 0;
 }
-

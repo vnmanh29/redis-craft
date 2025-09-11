@@ -484,12 +484,36 @@ class TypeCommandExecutor : public AbstractInternalCommandExecutor {
 
         std::string arg1 = query.cmd_args[1];
         std::string reply = RESP_NONE;
-        
-        if (Database::GetInstance()->IsKeyExist(arg1)) {
-            reply = "+string\r\n";
-        } else {
-            reply = RESP_NONE;
+
+        std::string type = Database::GetInstance()->GetKeyType(arg1);
+        reply = EncodeRespSimpleStr(type);
+
+        client->WriteAsync(reply, APP_RECV | ALL_SEND);
+    }
+};
+
+class XAddCommandExecutor : public AbstractInternalCommandExecutor {
+    void execute(const Query &query, std::shared_ptr<Client> client) override {
+        /**
+         * Format: XADD <stream_key> <ID> key0 val0 [key1 val1 ...]
+         */
+        /// 1. validate query
+        if (query.cmd_args.size() < 3 || (query.cmd_args.size() % 2 == 0)) {
+            LOG_ERROR(EXECUTOR, "Invalid argc of command XAdd, argc = %d", query.cmd_args.size());
+            return;
         }
+
+        std::string stream_key = query.cmd_args[1];
+        std::string entry_id;
+
+        int ret = Database::GetInstance()->XAdd(query.cmd_args, entry_id);
+        if (ret < 0) {
+            LOG_ERROR("CMD", "XADD %s fail %d", stream_key.c_str(), ret);
+            client->WriteAsync("Invalid argv of command XADD", APP_RECV | ALL_SEND);
+            return;
+        }
+
+        std::string reply = EncodeRespSimpleStr(entry_id);
 
         client->WriteAsync(reply, APP_RECV | ALL_SEND);
     }
@@ -537,6 +561,8 @@ AbstractInternalCommandExecutor::createCommandExecutor(const CommandType cmd_typ
             return std::make_shared<WaitCommandExecutor>();
         case TypeCmd:
             return std::make_shared<TypeCommandExecutor>();
+        case XAddCmd:
+            return std::make_shared<XAddCommandExecutor>();
         default:
             std::cerr << "Unknown command type: " << cmd_type << std::endl;
             return std::make_shared<UnknownCommandExecutor>();
