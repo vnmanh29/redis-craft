@@ -25,6 +25,12 @@ std::string EncodeRespSimpleStr(std::string s) {
     return resp_str;
 }
 
+std::string EncodeRespBulkStr(const std::string& s) {
+    resp::encoder<std::string> encoder;
+    auto resp_bulk = encoder.encode_bulk_str(s, s.size());
+    return resp_bulk;
+}
+
 void ResetQuery(Query &query) {
     query.cmd = nullptr;
     query.flags = 0;

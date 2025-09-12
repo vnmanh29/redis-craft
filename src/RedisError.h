@@ -24,6 +24,8 @@ enum Error {
     ReceiveRdbFileError = -13,
     SyncWriteError = -14,
     SyncReadError = -15,
+    InvalidXaddEntryIdError = -16,
+    NonMonotonicEntryIdError = -17,
 
 
     /// retriable errors

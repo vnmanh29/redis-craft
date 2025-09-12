@@ -11,6 +11,8 @@
 #include "status.h"
 #include "slice.h"
 
+#define ROOT_ENTRY_ID "0-0"
+
 namespace RdbParser {
 
     struct AuxKV {

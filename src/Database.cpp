@@ -48,8 +48,13 @@ int Database::XAdd(const VString &argv, std::string &entry_id) {
 
     int ret = table_[stream_key]->AddStream(argv, entry_id);
     if (ret < 0) {
-        LOG_ERROR("Stream", "Add stream fail");
-        return ret;
+        LOG_ERROR("Stream", "Add stream fail %d", ret);
+        if (ret == -1) {
+            return NonMonotonicEntryIdError;
+        } else if (ret == -2) {
+            return InvalidXaddEntryIdError;
+        }
+        return UnknownError;
     }
 
     return 0;

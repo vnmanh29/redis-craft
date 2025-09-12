@@ -71,6 +71,8 @@ std::string EncodeArr2RespArr(std::vector<std::string> arr);
 
 std::string EncodeRespSimpleStr(std::string s);
 
+std::string EncodeRespBulkStr(const std::string& s);
+
 std::string EncodeRespInteger(const int n);
 
 void ResetQuery(Query &query);

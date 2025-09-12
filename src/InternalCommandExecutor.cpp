@@ -509,11 +509,19 @@ class XAddCommandExecutor : public AbstractInternalCommandExecutor {
         int ret = Database::GetInstance()->XAdd(query.cmd_args, entry_id);
         if (ret < 0) {
             LOG_ERROR("CMD", "XADD %s fail %d", stream_key.c_str(), ret);
-            client->WriteAsync("Invalid argv of command XADD", APP_RECV | ALL_SEND);
+            std::string error_message = RESP_NIL;
+            if (ret == NonMonotonicEntryIdError) {
+                error_message = "-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n";
+            }
+            else if (ret == InvalidXaddEntryIdError) {                
+                error_message = "-ERR The ID specified in XADD must be greater than 0-0\r\n";
+            }
+
+            client->WriteAsync(error_message, APP_RECV | ALL_SEND);
             return;
         }
 
-        std::string reply = EncodeRespSimpleStr(entry_id);
+        std::string reply = EncodeRespBulkStr(entry_id);
 
         client->WriteAsync(reply, APP_RECV | ALL_SEND);
     }
