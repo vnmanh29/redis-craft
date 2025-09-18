@@ -21,7 +21,7 @@ private:
 
     Database() = default;
 
-    std::unordered_map<std::string, std::shared_ptr<RdbParser::ParsedResult>> table_;
+    std::map<std::string, std::shared_ptr<RdbParser::ParsedResult>> table_;
     int version_;
     static std::mutex m_;
 
@@ -31,6 +31,7 @@ private:
     bool IsEqualConfig(const std::shared_ptr<RedisConfig> &cfg) const;
 
 public:
+
     Database &operator=(const Database &rhs) = delete;
 
     Database(const Database &rhs) = delete;
@@ -47,7 +48,10 @@ public:
 
     std::string RetrieveValueOfKey(const std::string &key);
 
-    int XAdd(const VString &argv, std::string &entry_id);
+    int XAdd(const VString &argv, RdbParser::EntryID &entry_id);
+
+    std::vector<std::pair<RdbParser::EntryID, RdbParser::EntryStream>>
+    GetStreamRange(const std::string &stream_key, const std::string &start_id, const std::string &end_id);
 
     std::vector<std::string> RetrieveKeysMatchPattern(const std::string &pattern);
 

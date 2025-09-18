@@ -288,6 +288,8 @@ int Server::SetupCommands() {
     AddCommand("type", TypeCmd, READ_CMD);
     AddCommand("xadd", XAddCmd, READ_CMD);
 
+    AddCommand("xrange", XRangeCmd, READ_CMD);
+
     return 0;
 }
 

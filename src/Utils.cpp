@@ -19,13 +19,18 @@ std::string EncodeArr2RespArr(std::vector<std::string> arr) {
     return resp_str;
 }
 
+std::string EncodeArr2RespArr2(std::vector<std::string> arr) {
+    resp::encoder<std::string> enc;
+    return enc.encode_array(arr);
+}
+
 std::string EncodeRespSimpleStr(std::string s) {
     resp::encoder<std::string> enc;
     std::string resp_str = enc.encode_simple_str(s);
     return resp_str;
 }
 
-std::string EncodeRespBulkStr(const std::string& s) {
+std::string EncodeRespBulkStr(const std::string &s) {
     resp::encoder<std::string> encoder;
     auto resp_bulk = encoder.encode_bulk_str(s, s.size());
     return resp_bulk;

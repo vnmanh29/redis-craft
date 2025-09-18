@@ -759,16 +759,10 @@ int RdbParseImpl::GetVersion() {
     return version_;
 }
 
-static std::string GetEntryStreamId(const std::string& id, const std::string& prev_entry_id) {
-  auto pos = prev_entry_id.find('-');
-  if (pos == std::string::npos) {
-    /// invalid pre_entry_id
-    std::cerr << "Invalid prev entry id" << std::endl;
-    return ROOT_ENTRY_ID;
-  }
+static EntryID GetEntryStreamId(const std::string& id, const EntryID &prev_entry_id) {
 
-  auto prev_timestamp = std::stoll(prev_entry_id.substr(0, pos));
-  auto prev_sequence_number = std::stoll(prev_entry_id.substr(pos + 1));
+  auto prev_timestamp = prev_entry_id.timestamp;
+  auto prev_sequence_number = prev_entry_id.sequence_number;
   
   std::stringstream ss;
   long long now = std::chrono::duration_cast<std::chrono::milliseconds> (std::chrono::system_clock::now().time_since_epoch()).count();
@@ -777,14 +771,13 @@ static std::string GetEntryStreamId(const std::string& id, const std::string& pr
     /// case auto-generate
     if (now < prev_timestamp) {
       std::cerr << "Invalid prev timestamp" << std::endl;
-      return ROOT_ENTRY_ID;
+      return {-1, -1};
     }
 
-    ss << now << "-0";
-    return ss.str();
+    return {now, 0};
 
   } else if (id.find('-') != std::string::npos) {
-    pos = id.find('-');
+    auto pos = id.find('-');
     auto timestamp = std::stoll(id.substr(0, pos));
     int64_t sequence_number = -1;// prev_sequence_number + 1;
     
@@ -796,7 +789,7 @@ static std::string GetEntryStreamId(const std::string& id, const std::string& pr
     if (timestamp < prev_timestamp) {
       /// invalid supplied timestamp
       std::cerr << "Invalid provided id" << id << std::endl;
-      return ROOT_ENTRY_ID;
+      return {-1, -1};
     }
     else if (timestamp == prev_timestamp && sequence_number <= prev_sequence_number) {
       if (sequence_number < 0) {
@@ -806,48 +799,47 @@ static std::string GetEntryStreamId(const std::string& id, const std::string& pr
       else if (sequence_number <= prev_sequence_number) {
         /// provide invalid sequence number
         std::cerr << "Invalid provided id" << id << std::endl;
-        return ROOT_ENTRY_ID;
+        return {-1, -1};
       }
     }
 
     if (sequence_number < 0) sequence_number = 0;
-    
-    ss << timestamp << "-" << sequence_number;
 
-    return ss.str();
+    return {timestamp, sequence_number};
+
   } else {
     std::cerr << "Invalid format of provided id" << std::endl;
-    return ROOT_ENTRY_ID;
+    return {-1, -1};
   }
 }
 
-int ParsedResult::AddStream(const std::vector<std::string>& data, std::string& entry_id)
+int ParsedResult::AddStream(const std::vector<std::string>& data, EntryID& entry_id)
 {
   /// validate input
-  if (data.size() < 1 || (data.size() % 2 == 0)) {
+  if (data.empty() || (data.size() % 2 == 0)) {
     return -1;
   }
 
-  std::string prev_entry_id = ROOT_ENTRY_ID;
+  EntryID prev_entry_id{0, 0};
   if (!stream.empty()) {
     prev_entry_id = stream.rbegin()->first;
   }
 
-  std::string id = data[2];
+  const std::string& id = data[2];
   if (id == ROOT_ENTRY_ID) {
     return -2;
   }   
   
   /// get new entry_id
   entry_id = GetEntryStreamId(id, prev_entry_id);
-  if (entry_id == ROOT_ENTRY_ID) {
+  if (entry_id.timestamp < 0 || entry_id.sequence_number < 0) {
     return -1;
   }
 
   /// build entry_stream
   EntryStream ent;
-  for (int i = 3;i + 1 < data.size(); ++i) {
-    ent.key_vals.push_back({data[i], data[i+1]});
+  for (int i = 3;i < data.size(); ++i) {
+    ent.push_back(std::move(data[i]));
   }
 
   stream.insert({entry_id, std::move(ent)});

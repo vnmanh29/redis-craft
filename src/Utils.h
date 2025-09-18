@@ -49,6 +49,7 @@ enum CommandType {
     WaitCmd,
     TypeCmd,
     XAddCmd,
+    XRangeCmd,
     UnknownCmd
 };
 
@@ -69,9 +70,13 @@ typedef struct Query {
 /// input: array of strings. Output: a string presents RESP Array
 std::string EncodeArr2RespArr(std::vector<std::string> arr);
 
+/// Input: array of strings. Each element in the input array must be in RESP format.
+/// Output: a string presents RESP Array
+std::string EncodeArr2RespArr2(std::vector<std::string> arr);
+
 std::string EncodeRespSimpleStr(std::string s);
 
-std::string EncodeRespBulkStr(const std::string& s);
+std::string EncodeRespBulkStr(const std::string &s);
 
 std::string EncodeRespInteger(const int n);
 

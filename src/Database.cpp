@@ -38,7 +38,7 @@ void Database::SetKeyVal(const std::string &key, const std::string &val, int on_
     table_[key] = std::make_shared<RdbParser::ParsedResult>(key, val, expired_ts);
 }
 
-int Database::XAdd(const VString &argv, std::string &entry_id) {
+int Database::XAdd(const VString &argv, RdbParser::EntryID &entry_id) {
     std::string stream_key = argv[1];
 
     if (table_.find(stream_key) == table_.end()) {
@@ -199,4 +199,27 @@ int Database::LoadPersistentDb() {
 
     /// 3. TODO: load data to memory
     return 0;
+}
+
+std::vector<std::pair<RdbParser::EntryID, RdbParser::EntryStream>>
+Database::GetStreamRange(const std::string &stream_key, const std::string &start_id, const std::string &end_id) {
+    std::vector<std::pair<RdbParser::EntryID, RdbParser::EntryStream>> stream_range;
+
+    try {
+        auto &stream_entry = table_.at(stream_key)->stream;
+        /// normalize start id
+        RdbParser::EntryID start = RdbParser::BuildEntryId(start_id, 0);
+        RdbParser::EntryID end = RdbParser::BuildEntryId(end_id, INT64_MAX);
+
+        auto start_it = stream_entry.lower_bound(start);
+        auto end_it = stream_entry.upper_bound(end);
+        for (auto it = start_it; it != end_it && it != stream_entry.end(); ++it) {
+            stream_range.emplace_back(it->first, it->second);
+        }
+
+        return stream_range;
+    }
+    catch (std::exception &ex) {
+        return stream_range;
+    }
 }

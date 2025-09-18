@@ -7,6 +7,7 @@
 #include <set>
 #include <memory>
 #include <vector>
+#include <iostream>
 
 #include "status.h"
 #include "slice.h"
@@ -19,6 +20,59 @@ namespace RdbParser {
         std::string aux_key;
         std::string aux_val;
     };
+
+    typedef struct EntryID {
+        int64_t timestamp;
+        int64_t sequence_number;
+    } EntryID;
+
+    typedef struct EntryCmp {
+        bool operator()(const EntryID &e1, const EntryID &e2) const {
+            if (e1.timestamp == e2.timestamp) {
+                return e1.sequence_number < e2.sequence_number;
+            }
+
+            return e1.timestamp < e2.timestamp;
+        }
+    } EntryCmp;
+
+    inline EntryID BuildEntryId(const std::string &id, int64_t default_sequence_number = 0) {
+        /// handle special case: "-" and "+"
+        if (id == "-") {
+            return {0, 0};
+        }
+        else if (id == "+") {
+            return {INT64_MAX, INT64_MAX};
+        }
+
+        auto pos = id.find('-');
+        EntryID entry_id{-1, -1};
+        try {
+            if (pos != std::string::npos) {
+                /// format: <timestamp>-<sequence_number>
+                auto time_part = id.substr(0, pos);
+                auto number_part = id.substr(pos + 1);
+
+                entry_id.timestamp = std::stoll(time_part);
+                entry_id.sequence_number = std::stoll(number_part);
+            }
+            else {
+                /// format: <timestamp>
+                entry_id.timestamp = std::stoll(id);
+                entry_id.sequence_number = default_sequence_number;
+
+            }
+
+            return entry_id;
+        }
+        catch (std::exception& ex) {
+            std::cerr << "Build entry " << id << " fail " << ex.what() << std::endl;
+            return {-1, -1};
+        }
+    }
+
+    using KeyValStr = std::pair<std::string, std::string>;
+    typedef std::vector<std::string> EntryStream;
 
     struct ParsedResult {
         ParsedResult() : expire_time(-1) {}
@@ -77,16 +131,10 @@ namespace RdbParser {
 
         void Debug();
 
-        using KeyValStr = std::pair<std::string, std::string>;
-
-        typedef struct EntryStream {
-            std::vector<KeyValStr> key_vals;
-        } EntryStream;
-
-        std::map<std::string, EntryStream> stream;
+        std::map<EntryID, EntryStream, EntryCmp> stream;
 
         /// add new entry stream. auto generate the 
-        int AddStream(const std::vector<std::string> &data, std::string &entry_id);
+        int AddStream(const std::vector<std::string> &data, EntryID &entry_id);
     };
 
     std::shared_ptr<ParsedResult> ResultMove(ParsedResult *result);
@@ -113,5 +161,5 @@ namespace RdbParser {
     };
 
 }
-#endif
+#endif // __RDBPARSE_H__
 

@@ -342,6 +342,22 @@ public:
       return buffers;
   }
 
+  buffer_t encode_array(std::vector<buffer_t> const& argv) {
+    buffer_t buf;
+    /// append size first
+    char size_str[24];
+    std::snprintf(size_str, 24, "*%u", (unsigned int)argv.size());
+    buf.append(size_str);
+    buf.append("\r\n");
+
+    /// append all elements 
+    for (auto& arg : argv) {
+      buf.append(arg);
+    }
+
+    return buf;
+  }
+
 
 private:
   std::vector<buffer_t>* buffers_;

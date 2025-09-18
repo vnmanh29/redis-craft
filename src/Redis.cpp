@@ -91,5 +91,7 @@ int main(int argc, char **argv) {
 /**
  * TODO: 
  * - Implement the RESP parser
+ * - RDB parser
+ * - 
  * 
  */

@@ -504,7 +504,7 @@ class XAddCommandExecutor : public AbstractInternalCommandExecutor {
         }
 
         std::string stream_key = query.cmd_args[1];
-        std::string entry_id;
+        RdbParser::EntryID entry_id;
 
         int ret = Database::GetInstance()->XAdd(query.cmd_args, entry_id);
         if (ret < 0) {
@@ -512,8 +512,7 @@ class XAddCommandExecutor : public AbstractInternalCommandExecutor {
             std::string error_message = RESP_NIL;
             if (ret == NonMonotonicEntryIdError) {
                 error_message = "-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n";
-            }
-            else if (ret == InvalidXaddEntryIdError) {                
+            } else if (ret == InvalidXaddEntryIdError) {
                 error_message = "-ERR The ID specified in XADD must be greater than 0-0\r\n";
             }
 
@@ -521,9 +520,59 @@ class XAddCommandExecutor : public AbstractInternalCommandExecutor {
             return;
         }
 
-        std::string reply = EncodeRespBulkStr(entry_id);
+        char entry_id_str[128] = {0};
+        snprintf(entry_id_str, 128, "%lld-%lld", entry_id.timestamp, entry_id.sequence_number);
+
+        std::string reply = EncodeRespBulkStr(entry_id_str);
 
         client->WriteAsync(reply, APP_RECV | ALL_SEND);
+    }
+};
+
+class XRangeCommandExecutor : public AbstractInternalCommandExecutor {
+private:
+    std::string ConvertEntryIdToRESP(const RdbParser::EntryID &entry_id) {
+        /// 1. convert to string
+        char buffer[128] = {0};
+        snprintf(buffer, 127, "%lld-%lld", entry_id.timestamp, entry_id.sequence_number);
+        /// 2. convert string to RESP
+        return EncodeRespBulkStr(buffer);
+    }
+
+    std::string ConvertEntryStreamToRESP(const RdbParser::EntryStream &entry_stream) {
+        return EncodeArr2RespArr(entry_stream);
+    }
+
+public:
+    void execute(const Query &query, std::shared_ptr<Client> client) override {
+        /**
+         * @brief Format: XRANGE <stream_key> <start> <end> [COUNT count] [BLOCK miliseconds]
+         * 
+         */
+        /// 1. validate query param
+        if (query.cmd_args.size() < 4) {
+            LOG_ERROR(EXECUTOR, "Invalid argc of command XRange, argc = %zu", query.cmd_args.size());
+            return;
+        }
+
+        auto &stream_key = query.cmd_args[1];
+        auto &start_id = query.cmd_args[2];
+        auto &end_id = query.cmd_args[3];
+
+        auto stream_range = Database::GetInstance()->GetStreamRange(stream_key, start_id, end_id);
+        std::vector<std::string> resp_entries;
+        for (auto &entry: stream_range) {
+            /// encode each entry to RESP format
+            auto &stream_id = entry.first;
+            auto &entry_stream = entry.second;
+
+            std::string stream_id_resp = ConvertEntryIdToRESP(stream_id);
+            std::string entry_stream_resp = ConvertEntryStreamToRESP(entry_stream);
+
+            resp_entries.push_back(EncodeArr2RespArr2({stream_id_resp, entry_stream_resp}));
+        }
+
+        client->WriteAsync(EncodeArr2RespArr2(resp_entries), APP_RECV | ALL_SEND);
     }
 };
 
@@ -571,6 +620,8 @@ AbstractInternalCommandExecutor::createCommandExecutor(const CommandType cmd_typ
             return std::make_shared<TypeCommandExecutor>();
         case XAddCmd:
             return std::make_shared<XAddCommandExecutor>();
+        case XRangeCmd:
+            return std::make_shared<XRangeCommandExecutor>();
         default:
             std::cerr << "Unknown command type: " << cmd_type << std::endl;
             return std::make_shared<UnknownCommandExecutor>();
